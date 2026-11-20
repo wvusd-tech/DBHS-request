@@ -277,7 +277,7 @@ function doPost(e) {
       const userEmail = authUser.email;
       const isOps = approversDir.calendarEditors.includes(userEmail);
       const isApprover = approversDir.allApprovers.has(userEmail);
-      const isAdmin = isOps || (userEmail.endsWith('@wvusd.org') && (userEmail.startsWith('kwendland') || isOps));
+      const isAdmin = isOps || (userEmail.endsWith('@wvusd.org') && (userEmail.startsWith('kwendland') || userEmail.startsWith('jwai') || isOps));
 
       return createJsonResponse({
         success: true,
@@ -1246,7 +1246,7 @@ function getPortalData(passedUserEmail) {
 
   const isOpsSecretary = approversDir.calendarEditors.includes(userEmail);
   const isLocationApprover = approversDir.allApprovers.has(userEmail);
-  const isAdmin = isOpsSecretary || (userEmail.endsWith('@wvusd.org') && (userEmail.startsWith('kwendland') || isOpsSecretary));
+  const isAdmin = isOpsSecretary || (userEmail.endsWith('@wvusd.org') && (userEmail.startsWith('kwendland') || userEmail.startsWith('jwai') || isOpsSecretary));
 
   // Find locations assigned to current approver
   const userLocations = [];
@@ -1478,7 +1478,7 @@ function handleApprovalAction(payload, passedUserEmail) {
     // Authorization verification
     const approversDir = getApproversDirectory_();
     const isOpsSecretary = approversDir.calendarEditors.includes(userEmail);
-    const isAdmin = isOpsSecretary || userEmail.startsWith('kwendland');
+    const isAdmin = isOpsSecretary || userEmail.startsWith('kwendland') || userEmail.startsWith('jwai');
     const locationApprovers = resolveApproversForLocation_(targetRow[COL.LOCATION], approversDir);
     const isAuthorizedApprover = locationApprovers.includes(userEmail) || isAdmin;
 
@@ -1858,7 +1858,7 @@ function updateCalendarSchedule(payload, passedUserEmail) {
   const userEmail = (passedUserEmail || payload.userEmail || getCurrentUserEmail_()).toLowerCase().trim();
   const approversDir = getApproversDirectory_();
   const isOpsSecretary = approversDir.calendarEditors.includes(userEmail);
-  const isAdmin = isOpsSecretary || userEmail.startsWith('kwendland');
+  const isAdmin = isOpsSecretary || userEmail.startsWith('kwendland') || userEmail.startsWith('jwai');
 
   // Server-side authorization check
   if (!isOpsSecretary && !isAdmin) {

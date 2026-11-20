@@ -32,8 +32,8 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, onLogout,
               />
             </div>
             <div className="hidden sm:block">
-              <span className="font-extrabold text-lg tracking-wide text-white flex items-center gap-1.5">
-                DBHS Activities <span className="text-[#ffd760] font-normal text-sm px-2 py-0.5 rounded-full bg-purple-900/60 border border-[#ffd760]/40">Portal</span>
+              <span className="font-extrabold text-lg tracking-wide text-white flex items-center gap-2">
+                DBHS Activities <span className="bg-[#ffd760] text-purple-950 font-black text-xs px-2.5 py-0.5 rounded-full shadow-sm tracking-normal">Portal</span>
               </span>
               <p className="text-xs text-purple-200">Diamond Bar High School • WVUSD</p>
             </div>

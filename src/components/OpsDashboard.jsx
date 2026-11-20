@@ -96,14 +96,11 @@ export default function OpsDashboard({
     });
   }, [requests, statusFilter, locationFilter, monthFilter, searchQuery]);
 
-  // Currently selected request
+  // Currently selected request (kept clear until an activity is clicked)
   const currentRequest = useMemo(() => {
-    if (!selectedReqId && filteredRequests.length > 0) {
-      const firstApproved = filteredRequests.find(r => r.status === 'Approved');
-      return firstApproved || filteredRequests[0];
-    }
-    return filteredRequests.find(r => r.requestId === selectedReqId) || filteredRequests[0] || null;
-  }, [selectedReqId, filteredRequests]);
+    if (!selectedReqId) return null;
+    return requests.find(r => r.requestId === selectedReqId) || null;
+  }, [selectedReqId, requests]);
 
   // Security gate for non-Ops Secretaries
   if (!hasAccess) {
@@ -526,8 +523,14 @@ export default function OpsDashboard({
 
             </div>
           ) : (
-            <div className="bg-white rounded-3xl border border-purple-100 p-12 text-center text-slate-400">
-              Select an activity from the left list to review or edit.
+            <div className="bg-white rounded-3xl border border-purple-100 p-16 text-center shadow-sm flex flex-col items-center justify-center min-h-[460px]">
+              <div className="w-16 h-16 bg-purple-50 text-[#6f31a0] rounded-full flex items-center justify-center mb-4 border border-purple-100 shadow-sm">
+                <Calendar className="w-8 h-8 text-[#6f31a0]" />
+              </div>
+              <h3 className="text-lg font-black text-purple-950">No Activity Selected</h3>
+              <p className="text-xs text-slate-500 max-w-sm mt-1.5 leading-relaxed">
+                Choose an activity from the list on the left to inspect facility setups, review equipment requirements, post coordination notes, or edit calendar events.
+              </p>
             </div>
           )}
         </div>

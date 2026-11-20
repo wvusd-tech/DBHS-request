@@ -15,6 +15,13 @@ export default function LoginGate({ onLogin }) {
       roles: { isAdmin: true, isOpsSecretary: true, isApprover: true }
     },
     { 
+      email: 'jwai@wvusd.org', 
+      role: 'Super Admin & Ops Secretary', 
+      label: 'Jen Wai (Full Access)',
+      locations: ['Amphitheater', 'Bullpen', 'Corkrum Corral', 'Gym', 'Golden Horseshoe', 'Library', 'Stadium', 'Theater', 'Upper Quad', 'Other'],
+      roles: { isAdmin: true, isOpsSecretary: true, isApprover: true }
+    },
+    { 
       email: 'athletics@wvusd.org', 
       role: 'Location Approver', 
       label: 'Gym & Stadium Approver',
