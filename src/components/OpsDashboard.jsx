@@ -129,10 +129,35 @@ export default function OpsDashboard({
   // Open Edit Calendar Modal
   const handleOpenEditModal = () => {
     if (!currentRequest) return;
+
+    // Convert date string to YYYY-MM-DD for the HTML5 <input type="date">
+    let dateForInput = '';
+    const rawDate = currentRequest.eventDateRaw || currentRequest.eventDate;
+    if (rawDate) {
+      const str = String(rawDate).trim();
+      const usMatch = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+      if (usMatch) {
+        const m = usMatch[1].padStart(2, '0');
+        const d = usMatch[2].padStart(2, '0');
+        const y = usMatch[3];
+        dateForInput = `${y}-${m}-${d}`;
+      } else if (str.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        dateForInput = str;
+      } else {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          const y = d.getFullYear();
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          dateForInput = `${y}-${m}-${day}`;
+        }
+      }
+    }
+
     setEditFormData({
       eventTitle: currentRequest.eventTitle || '',
       location: currentRequest.location || 'Gym',
-      eventDate: currentRequest.eventDate || '',
+      eventDate: dateForInput,
       additionalDates: currentRequest.reoccurringDates || '',
       editAllRecurring: true,
       eventStartTime: currentRequest.startTime || '',
@@ -586,13 +611,13 @@ export default function OpsDashboard({
                 </label>
                 <input
                   type="text"
-                  placeholder="e.g. 2026-12-12, 2026-12-13"
+                  placeholder="e.g. 12-12-2026, 12-13-2026 or 2026-12-12, 2026-12-13"
                   value={editFormData.additionalDates}
                   onChange={(e) => setEditFormData({ ...editFormData, additionalDates: e.target.value })}
                   className="w-full text-xs px-3 py-2 border rounded-xl focus:outline-none font-mono"
                 />
-                <p className="text-[11px] text-slate-400 mt-0.5">
-                  Add or remove dates. Google Calendar events will be created/removed to match.
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Accepts US format (<code>12-13-2026</code>, <code>12/13/2026</code>) or standard format (<code>2026-12-13</code>). Google Calendar events will be created/updated/removed to match.
                 </p>
               </div>
 

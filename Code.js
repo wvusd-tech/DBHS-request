@@ -490,7 +490,7 @@ function submitActivityRequest(payload, userEmail) {
     newRow[COL.REQUESTING_GROUP] = payload.requestingGroup || '';
     newRow[COL.ADVISOR_NAME] = payload.advisorName || '';
     newRow[COL.ADVISOR_EMAIL] = advisorEmail;
-    newRow[COL.EVENT_DATE] = payload.eventDate || '';
+    newRow[COL.EVENT_DATE] = payload.eventDate ? (parseFlexibleDate_(payload.eventDate) || payload.eventDate) : '';
     newRow[COL.EVENT_TITLE] = payload.eventTitle || '';
     newRow[COL.IS_REOCCURRING] = payload.isReoccurring || 'No';
     newRow[COL.REOCCURRING_DATES] = payload.reoccurringDates || '';
@@ -1713,7 +1713,49 @@ function buildCalendarEventDescription_(row) {
 }
 
 /**
+ * Robustly parses a date value from various formats:
+ * - US format: MM-DD-YYYY or MM/DD/YYYY (e.g. 12-13-2026, 12/13/2026)
+ * - ISO format: YYYY-MM-DD or YYYY/MM/DD (e.g. 2026-12-13)
+ * - Date object: normalized using local date components to prevent UTC timezone shift
+ */
+function parseFlexibleDate_(val) {
+  if (!val) return null;
+  if (val instanceof Date) {
+    return new Date(val.getFullYear(), val.getMonth(), val.getDate());
+  }
+  const str = String(val).trim();
+  if (!str) return null;
+
+  // Format 1: US Format MM-DD-YYYY or MM/DD/YYYY
+  const usMatch = str.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if (usMatch) {
+    const m = parseInt(usMatch[1], 10) - 1;
+    const d = parseInt(usMatch[2], 10);
+    const y = parseInt(usMatch[3], 10);
+    return new Date(y, m, d);
+  }
+
+  // Format 2: ISO Format YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = str.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (isoMatch) {
+    const y = parseInt(isoMatch[1], 10);
+    const m = parseInt(isoMatch[2], 10) - 1;
+    const d = parseInt(isoMatch[3], 10);
+    return new Date(y, m, d);
+  }
+
+  // Fallback: standard Date parsing
+  const parsed = Date.parse(str);
+  if (!isNaN(parsed)) {
+    const temp = new Date(parsed);
+    return new Date(temp.getFullYear(), temp.getMonth(), temp.getDate());
+  }
+  return null;
+}
+
+/**
  * Parses primary date and comma-separated reoccurring dates, deduplicating them.
+ * Supports both US dates (MM-DD-YYYY, MM/DD/YYYY) and ISO dates (YYYY-MM-DD).
  */
 function parseAndDeduplicateDates_(primaryDateVal, isReoccurring, additionalDatesStr) {
   const datesMap = {};
@@ -1721,15 +1763,7 @@ function parseAndDeduplicateDates_(primaryDateVal, isReoccurring, additionalDate
 
   const addDateIfValid = function(dVal) {
     if (!dVal) return;
-    let d = null;
-    if (dVal instanceof Date) {
-      d = new Date(dVal.getTime());
-    } else {
-      const parsed = Date.parse(String(dVal).trim());
-      if (!isNaN(parsed)) {
-        d = new Date(parsed);
-      }
-    }
+    const d = parseFlexibleDate_(dVal);
 
     if (d && !isNaN(d.getTime())) {
       // Normalize to date string YYYY-MM-DD for deduplication
@@ -1863,7 +1897,7 @@ function updateCalendarSchedule(payload, passedUserEmail) {
     // Prepare updated values
     const newTitle = String(payload.eventTitle || targetRow[COL.EVENT_TITLE]).trim();
     const newLocation = String(payload.location || targetRow[COL.LOCATION]).trim();
-    const newDate = payload.eventDate ? new Date(payload.eventDate) : targetRow[COL.EVENT_DATE];
+    const newDate = payload.eventDate ? (parseFlexibleDate_(payload.eventDate) || new Date(payload.eventDate)) : targetRow[COL.EVENT_DATE];
     const newReoccurringDates = payload.additionalDates !== undefined ? String(payload.additionalDates).trim() : String(targetRow[COL.REOCCURRING_DATES] || '');
     const newIsReoccurring = (newReoccurringDates && newReoccurringDates.length > 0) ? 'Yes' : 'No';
     const newStartTime = payload.eventStartTime || targetRow[COL.START_TIME];
