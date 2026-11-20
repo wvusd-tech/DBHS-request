@@ -134,7 +134,7 @@ export default function OpsDashboard({
   const filteredRequests = useMemo(() => {
     return requests.filter(r => {
       if (statusFilter === 'Approved' && r.status !== 'Approved') return false;
-      if (statusFilter === 'Pending' && r.status !== 'Pending') return false;
+      if (statusFilter === 'Pending' && !String(r.status || '').toLowerCase().includes('pending')) return false;
       if (statusFilter === 'Changes Requested' && r.status !== 'Changes Requested') return false;
       if (locationFilter !== 'All' && r.location !== locationFilter) return false;
 

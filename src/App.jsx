@@ -13,6 +13,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('teacher'); // 'teacher' | 'approver' | 'ops'
   
   const [requests, setRequests] = useState([]);
+  const [approvalChain, setApprovalChain] = useState([]);
   const [stats, setStats] = useState({});
   const [loading, setLoading] = useState(false);
   const [isNewModalOpen, setIsNewModalOpen] = useState(false);
@@ -57,6 +58,9 @@ export default function App() {
       if (data && data.requests) {
         setRequests(data.requests || []);
         setStats(data.stats || {});
+        if (data.approvalChain) {
+          setApprovalChain(data.approvalChain);
+        }
       }
     } catch (err) {
       console.warn('Could not load portal data:', err);
@@ -89,7 +93,7 @@ export default function App() {
     return <LoginGate onLogin={handleLogin} />;
   }
 
-  const pendingApproverCount = requests.filter(r => r.status === 'Pending').length;
+  const pendingApproverCount = requests.filter(r => String(r.status || '').toLowerCase().includes('pending')).length;
 
   return (
     <div className="min-h-screen bg-[#fbf9fd] text-slate-800 flex flex-col font-sans">
@@ -110,6 +114,7 @@ export default function App() {
           <TeacherDashboard
             requests={requests}
             currentUser={currentUser}
+            approvalChain={approvalChain}
             onOpenNewModal={() => setIsNewModalOpen(true)}
             onRefresh={loadPortalData}
           />
@@ -119,6 +124,7 @@ export default function App() {
           <ApproverDashboard
             requests={requests}
             currentUser={currentUser}
+            approvalChain={approvalChain}
             onRefresh={loadPortalData}
           />
         )}

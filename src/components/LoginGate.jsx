@@ -9,7 +9,7 @@ export default function LoginGate({ onLogin }) {
   const demoAccounts = [
     { 
       email: 'kwendland@wvusd.org', 
-      role: 'Ops Secretary & District Admin', 
+      role: 'Super Admin & Ops Secretary', 
       label: 'Kevin Wendland (Full Access)',
       locations: ['Amphitheater', 'Bullpen', 'Corkrum Corral', 'Gym', 'Golden Horseshoe', 'Library', 'Stadium', 'Theater', 'Upper Quad', 'Other'],
       roles: { isAdmin: true, isOpsSecretary: true, isApprover: true }
@@ -22,17 +22,45 @@ export default function LoginGate({ onLogin }) {
       roles: { isAdmin: true, isOpsSecretary: true, isApprover: true }
     },
     { 
+      email: 'cnorys@wvusd.org', 
+      role: 'Step 1 Approver', 
+      label: 'Activities Director (cnorys)',
+      locations: [],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
       email: 'athletics@wvusd.org', 
-      role: 'Location Approver', 
+      role: 'Step 2: Venue Approver', 
       label: 'Gym & Stadium Approver',
       locations: ['Gym', 'Stadium'],
       roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
     },
     { 
       email: 'theatertech@wvusd.org', 
-      role: 'Location Approver', 
+      role: 'Step 2: Venue Approver', 
       label: 'Theater Approver',
       locations: ['Theater'],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
+      email: 'mbromberg@wvusd.org', 
+      role: 'Step 3 Approver', 
+      label: 'Facilities & Operations (mbromberg)',
+      locations: [],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
+      email: 'yliew@wvusd.org', 
+      role: 'Step 4 Approver', 
+      label: 'Assistant Principal (yliew)',
+      locations: [],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
+      email: 'jvanhorn@wvusd.org', 
+      role: 'Step 5: Final Sign-off', 
+      label: 'Principal (jvanhorn - Syncs Cal)',
+      locations: [],
       roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
     },
     { 

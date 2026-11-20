@@ -9,7 +9,8 @@ export default function TeacherDashboard({
   requests = [], 
   currentUser, 
   onOpenNewModal, 
-  onRefresh 
+  onRefresh,
+  approvalChain = []
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -31,7 +32,7 @@ export default function TeacherDashboard({
   const stats = useMemo(() => {
     return {
       total: requests.length,
-      pending: requests.filter(r => r.status === 'Pending').length,
+      pending: requests.filter(r => String(r.status || '').toLowerCase().includes('pending')).length,
       approved: requests.filter(r => r.status === 'Approved').length,
       changes: requests.filter(r => r.status === 'Changes Requested').length
     };
@@ -188,6 +189,7 @@ export default function TeacherDashboard({
         isOpen={!!selectedRequest}
         onClose={() => setSelectedRequest(null)}
         currentUser={currentUser}
+        approvalChain={approvalChain}
         onActionComplete={onRefresh}
       />
     </div>

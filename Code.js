@@ -21,6 +21,7 @@ const CONFIG = {
   // Sheet Tab Names
   RESPONSES_SHEET: 'Responses',
   APPROVERS_SHEET: 'Approvers',
+  APPROVAL_CHAIN_SHEET: 'Approval Chain',
 
   // Branding Assets
   DBHS_LOGO_URL: 'https://res.cloudinary.com/djv9u4054/image/upload/v1783632852/0-DBARBRAHMASWide_q8uled-removebg-preview_x7ta88.png',
@@ -477,11 +478,13 @@ function submitActivityRequest(payload, userEmail) {
     const advisorEmail = String(payload.advisorEmail || '').trim().toLowerCase();
     const locationVal = String(payload.location || '').trim();
     const approversDir = getApproversDirectory_();
-    const approversList = resolveApproversForLocation_(locationVal, approversDir);
-    const approversEmailStr = approversList.join(', ');
+    const chain = getApprovalChain_();
+    const step1 = chain[0] || { step: 1, stageName: 'Activities Director' };
+    const step1Approver = resolveApproverForChainStep_(0, locationVal, chain, approversDir);
 
+    const initialStatus = 'Pending (Step 1 of ' + chain.length + ': ' + step1.stageName + ')';
     const initialLog = Utilities.formatDate(now, CONFIG.TIMEZONE, 'MM/dd/yyyy HH:mm') +
-      ': Submitted by ' + (submitter || 'Applicant') + '. Routed to: ' + (approversEmailStr || 'Other Approver');
+      ': Submitted by ' + (submitter || 'Applicant') + '. Routed to Step 1: ' + step1.stageName + ' (' + step1Approver + ')';
 
     // Build row array of 51 columns
     const newRow = new Array(51).fill('');
@@ -536,8 +539,8 @@ function submitActivityRequest(payload, userEmail) {
 
     // System Columns
     newRow[COL.REQUEST_ID] = requestId;
-    newRow[COL.OVERALL_STATUS] = CONFIG.STATUS.PENDING;
-    newRow[COL.CURRENT_APPROVER] = approversEmailStr;
+    newRow[COL.OVERALL_STATUS] = initialStatus;
+    newRow[COL.CURRENT_APPROVER] = step1Approver;
     newRow[COL.APPROVAL_LOG] = initialLog;
     newRow[COL.CALENDAR_EVENT_IDS] = '';
     newRow[COL.CALENDAR_SYNC_STATUS] = 'Not Synced';
@@ -551,8 +554,8 @@ function submitActivityRequest(payload, userEmail) {
 
     // Send Emails
     try {
-      if (approversList.length > 0) {
-        sendApproverNotificationEmail_(approversList, reqObj);
+      if (step1Approver) {
+        sendApproverNotificationEmail_(step1Approver.split(',').map(s => s.trim()), reqObj);
       }
       const applicants = [submitter, advisorEmail].filter(Boolean);
       if (applicants.length > 0) {
@@ -564,7 +567,7 @@ function submitActivityRequest(payload, userEmail) {
 
     return {
       requestId: requestId,
-      status: CONFIG.STATUS.PENDING,
+      status: initialStatus,
       currentApprover: approversEmailStr,
       diagramUrl: diagramUrl
     };
@@ -1134,6 +1137,67 @@ function resolveApproversForLocation_(locationStr, approversDir) {
   return approversDir.locationMap['other'] || approversDir.locationMap['Other'] || [];
 }
 
+/**
+ * Reads the Approval Chain tab (dynamically managed in Google Sheets).
+ * Col A: Step (integer, e.g. 1, 2, 3...)
+ * Col B: Stage Name (e.g. Activities Director, Venue / Location, Facilities & Operations...)
+ * Col C: Type ('Fixed' vs 'Dynamic')
+ * Col D: Email / Source (e.g. cnorys@wvusd.org, Location, mbromberg@wvusd.org...)
+ */
+function getApprovalChain_() {
+  const ss = SpreadsheetApp.openById(CONFIG.MASTER_SHEET_ID);
+  const sheet = ss.getSheetByName(CONFIG.APPROVAL_CHAIN_SHEET);
+  
+  const defaultChain = [
+    { step: 1, stageName: 'Activities Director', type: 'fixed', isDynamic: false, emailSource: 'cnorys@wvusd.org' },
+    { step: 2, stageName: 'Venue / Location', type: 'dynamic', isDynamic: true, emailSource: 'Location' },
+    { step: 3, stageName: 'Facilities & Operations', type: 'fixed', isDynamic: false, emailSource: 'mbromberg@wvusd.org' },
+    { step: 4, stageName: 'Assistant Principal', type: 'fixed', isDynamic: false, emailSource: 'yliew@wvusd.org' },
+    { step: 5, stageName: 'Principal / Final Sign-off', type: 'fixed', isDynamic: false, emailSource: 'jvanhorn@wvusd.org' }
+  ];
+
+  if (!sheet) return defaultChain;
+
+  const data = sheet.getDataRange().getValues();
+  if (data.length <= 1) return defaultChain;
+
+  const chain = [];
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const stepNum = parseInt(row[0], 10) || i;
+    const stageName = String(row[1] || ('Step ' + stepNum)).trim();
+    const typeStr = String(row[2] || '').trim().toLowerCase();
+    const isDynamic = typeStr.includes('dynamic') || typeStr.includes('location') || stageName.toLowerCase().includes('location') || stageName.toLowerCase().includes('venue');
+    const emailSource = String(row[3] || '').trim();
+
+    if (stageName || emailSource) {
+      chain.push({
+        step: stepNum,
+        stageName: stageName,
+        type: isDynamic ? 'dynamic' : 'fixed',
+        isDynamic: isDynamic,
+        emailSource: emailSource
+      });
+    }
+  }
+
+  chain.sort(function(a, b) { return a.step - b.step; });
+  return chain.length > 0 ? chain : defaultChain;
+}
+
+/**
+ * Resolves the assigned approver email(s) for a specific step in the approval chain.
+ */
+function resolveApproverForChainStep_(stepIndex, locationStr, chain, approversDir) {
+  if (stepIndex < 0 || stepIndex >= chain.length) return '';
+  const stepObj = chain[stepIndex];
+  if (stepObj.isDynamic) {
+    const venueApprovers = resolveApproversForLocation_(locationStr, approversDir);
+    return venueApprovers.join(', ');
+  }
+  return stepObj.emailSource || '';
+}
+
 
 // =================================================================================
 // 5. FORM SUBMISSION PROCESSOR (TRIGGER & BATCH)
@@ -1188,20 +1252,22 @@ function processPendingFormSubmissions() {
         maxIdNum++;
         const newRequestId = Utilities.formatString('%s%03d', CONFIG.ID_PREFIX, maxIdNum);
         const locationVal = String(row[COL.LOCATION] || '').trim();
-        const approversList = resolveApproversForLocation_(locationVal, approversDir);
-        const approversEmailStr = approversList.join(', ');
+        const chain = getApprovalChain_();
+        const step1 = chain[0] || { step: 1, stageName: 'Activities Director' };
+        const step1Approver = resolveApproverForChainStep_(0, locationVal, chain, approversDir);
+        const initialStatus = 'Pending (Step 1 of ' + chain.length + ': ' + step1.stageName + ')';
 
         const now = new Date();
         const submitterEmail = String(row[COL.SUBMITTER_EMAIL] || '').trim();
         const advisorEmail = String(row[COL.ADVISOR_EMAIL] || '').trim();
         const initialLog = Utilities.formatDate(now, CONFIG.TIMEZONE, 'MM/dd/yyyy HH:mm') +
-          ': Submitted by ' + (submitterEmail || 'Applicant') + '. Routed to: ' + (approversEmailStr || 'Other Approver');
+          ': Submitted by ' + (submitterEmail || 'Applicant') + '. Routed to Step 1: ' + step1.stageName + ' (' + step1Approver + ')';
 
         // Update sheet row (Col AS to AY -> indices 45 to 51)
         const rowIndex = i + 1;
         respSheet.getRange(rowIndex, COL.REQUEST_ID + 1).setValue(newRequestId);
-        respSheet.getRange(rowIndex, COL.OVERALL_STATUS + 1).setValue(CONFIG.STATUS.PENDING);
-        respSheet.getRange(rowIndex, COL.CURRENT_APPROVER + 1).setValue(approversEmailStr || 'Unassigned');
+        respSheet.getRange(rowIndex, COL.OVERALL_STATUS + 1).setValue(initialStatus);
+        respSheet.getRange(rowIndex, COL.CURRENT_APPROVER + 1).setValue(step1Approver || 'Unassigned');
         respSheet.getRange(rowIndex, COL.APPROVAL_LOG + 1).setValue(initialLog);
         respSheet.getRange(rowIndex, COL.CALENDAR_EVENT_IDS + 1).setValue('');
         respSheet.getRange(rowIndex, COL.CALENDAR_SYNC_STATUS + 1).setValue('Not Synced');
@@ -1209,13 +1275,13 @@ function processPendingFormSubmissions() {
 
         // Populate in-memory row representation for emails
         row[COL.REQUEST_ID] = newRequestId;
-        row[COL.OVERALL_STATUS] = CONFIG.STATUS.PENDING;
-        row[COL.CURRENT_APPROVER] = approversEmailStr;
+        row[COL.OVERALL_STATUS] = initialStatus;
+        row[COL.CURRENT_APPROVER] = step1Approver;
         const requestObj = mapRowToRequestObject_(row, rowIndex);
 
-        // 1. Email Location Approver(s)
-        if (approversList.length > 0) {
-          sendApproverNotificationEmail_(approversList, requestObj);
+        // 1. Email Step 1 Approver(s)
+        if (step1Approver) {
+          sendApproverNotificationEmail_(step1Approver.split(',').map(s => s.trim()), requestObj);
         }
 
         // 2. Email Confirmation to Submitter & Advisor
@@ -1272,28 +1338,35 @@ function getPortalData(passedUserEmail) {
   // Reverse so newest requests are on top
   requests.reverse();
 
+  const chain = getApprovalChain_();
+  const isChainApprover = chain.some(function(c) {
+    return !c.isDynamic && c.emailSource.toLowerCase() === userEmail;
+  });
+  const isApprover = isLocationApprover || isChainApprover || isOpsSecretary || isAdmin;
+
   // Calculate statistics
   const stats = {
     total: requests.length,
-    pending: requests.filter(r => r.status === CONFIG.STATUS.PENDING).length,
-    approved: requests.filter(r => r.status === CONFIG.STATUS.APPROVED).length,
-    denied: requests.filter(r => r.status === CONFIG.STATUS.DENIED).length,
-    changesRequested: requests.filter(r => r.status === CONFIG.STATUS.CHANGES_REQUESTED).length,
-    calendarSynced: requests.filter(r => r.calendarSyncStatus === 'Synced').length
+    pending: requests.filter(function(r) { return String(r.status || '').toLowerCase().includes('pending'); }).length,
+    approved: requests.filter(function(r) { return r.status === CONFIG.STATUS.APPROVED; }).length,
+    denied: requests.filter(function(r) { return r.status === CONFIG.STATUS.DENIED; }).length,
+    changesRequested: requests.filter(function(r) { return r.status === CONFIG.STATUS.CHANGES_REQUESTED; }).length,
+    calendarSynced: requests.filter(function(r) { return r.calendarSyncStatus === 'Synced'; }).length
   };
 
   return {
     currentUser: {
       email: userEmail,
       isOpsSecretary: isOpsSecretary,
-      isApprover: isLocationApprover,
+      isApprover: isApprover,
       isAdmin: isAdmin,
       locations: userLocations
     },
     requests: requests,
+    approvalChain: chain,
     stats: stats,
     webAppUrl: getWebAppUrl(),
-    approverLocations: Object.keys(approversDir.locationMap).filter(k => k.toLowerCase() !== 'other')
+    approverLocations: Object.keys(approversDir.locationMap).filter(function(k) { return k.toLowerCase() !== 'other'; })
   };
 }
 
@@ -1353,6 +1426,15 @@ function mapRowToRequestObject_(row, rowIndex) {
     ? Utilities.formatDate(lastUpdatedRaw, CONFIG.TIMEZONE, 'MM/dd/yyyy HH:mm')
     : String(lastUpdatedRaw || '').trim();
 
+  const rawStatus = String(row[COL.OVERALL_STATUS] || CONFIG.STATUS.PENDING);
+  let currentStepNum = 1;
+  const stepMatch = rawStatus.match(/Step (\d+)/i);
+  if (stepMatch) {
+    currentStepNum = parseInt(stepMatch[1], 10);
+  } else if (rawStatus === CONFIG.STATUS.APPROVED) {
+    currentStepNum = 999;
+  }
+
   return {
     rowIndex: rowIndex,
     requestId: String(row[COL.REQUEST_ID] || ''),
@@ -1410,7 +1492,8 @@ function mapRowToRequestObject_(row, rowIndex) {
     potentialNetProfit: String(row[COL.POTENTIAL_NET_PROFIT] || ''),
 
     // System Workflow Columns
-    status: String(row[COL.OVERALL_STATUS] || CONFIG.STATUS.PENDING),
+    status: rawStatus,
+    currentStep: currentStepNum,
     currentApprover: String(row[COL.CURRENT_APPROVER] || ''),
     approvalLog: String(row[COL.APPROVAL_LOG] || ''),
     calendarEventIds: String(row[COL.CALENDAR_EVENT_IDS] || ''),
@@ -1475,15 +1558,38 @@ function handleApprovalAction(payload, passedUserEmail) {
       throw new Error('Request ' + requestId + ' not found in sheet.');
     }
 
+    // Approval chain resolution
+    const chain = getApprovalChain_();
+    const currentStatus = String(targetRow[COL.OVERALL_STATUS] || '');
+    let currentStepNum = 1;
+    const stepMatch = currentStatus.match(/Step (\d+)/i);
+    if (stepMatch) {
+      currentStepNum = parseInt(stepMatch[1], 10);
+    } else if (currentStatus === CONFIG.STATUS.APPROVED) {
+      currentStepNum = chain.length;
+    }
+
+    const currentStepIndex = Math.max(0, Math.min(currentStepNum - 1, chain.length - 1));
+    const currentStepObj = chain[currentStepIndex] || { step: currentStepNum, stageName: 'Approval Stage ' + currentStepNum };
+
     // Authorization verification
     const approversDir = getApproversDirectory_();
     const isOpsSecretary = approversDir.calendarEditors.includes(userEmail);
     const isAdmin = isOpsSecretary || userEmail.startsWith('kwendland') || userEmail.startsWith('jwai');
-    const locationApprovers = resolveApproversForLocation_(targetRow[COL.LOCATION], approversDir);
-    const isAuthorizedApprover = locationApprovers.includes(userEmail) || isAdmin;
+    
+    const currentStageApprovers = resolveApproverForChainStep_(currentStepIndex, targetRow[COL.LOCATION], chain, approversDir)
+      .toLowerCase()
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const venueApprovers = resolveApproversForLocation_(targetRow[COL.LOCATION], approversDir);
 
-    if (!isAuthorizedApprover) {
-      throw new Error('Unauthorized: You are not an assigned approver for location "' + targetRow[COL.LOCATION] + '".');
+    const isStepAuthorized = currentStageApprovers.includes(userEmail) || 
+      (currentStepObj.isDynamic && venueApprovers.includes(userEmail)) ||
+      isAdmin;
+
+    if (!isStepAuthorized) {
+      throw new Error('Unauthorized: You are not an assigned approver for Step ' + currentStepNum + ' (' + currentStepObj.stageName + ').');
     }
 
     const now = new Date();
@@ -1499,48 +1605,51 @@ function handleApprovalAction(payload, passedUserEmail) {
     const advisorEmail = String(targetRow[COL.ADVISOR_EMAIL] || '');
 
     if (action === 'approve') {
-      newStatus = CONFIG.STATUS.APPROVED;
-      newCurrentApprover = 'Complete';
-      const logEntry = timestampStr + ': Approved by ' + userEmail + (comments ? ' (Comments: ' + comments + ')' : '');
-      existingLog = existingLog ? existingLog + '\n' + logEntry : logEntry;
+      const stepLog = timestampStr + ': [Approved at Step ' + currentStepNum + ' (' + currentStepObj.stageName + ') by ' + userEmail + ']' + (comments ? ' (Comments: ' + comments + ')' : '');
+      existingLog = existingLog ? existingLog + '\n' + stepLog : stepLog;
 
-      // Create Calendar Events for all parsed dates
-      const calendarResult = createCalendarEventsForRequest_(targetRow);
-      calendarEventIds = calendarResult.eventIds.join(', ');
-      calendarSyncStatus = calendarResult.success ? 'Synced' : 'Sync Error: ' + calendarResult.error;
+      if (currentStepNum < chain.length) {
+        // Advance to next step in chain
+        const nextStepNum = currentStepNum + 1;
+        const nextStepObj = chain[nextStepNum - 1];
+        const nextApprover = resolveApproverForChainStep_(nextStepNum - 1, targetRow[COL.LOCATION], chain, approversDir);
 
-      // Append calendar log
-      if (calendarResult.success) {
-        const calLog = timestampStr + ': Calendar events synced (' + calendarResult.eventIds.length + ' event(s))';
-        existingLog += '\n' + calLog;
+        newStatus = 'Pending (Step ' + nextStepNum + ' of ' + chain.length + ': ' + nextStepObj.stageName + ')';
+        newCurrentApprover = nextApprover;
+        existingLog += '\n' + timestampStr + ': Advanced to Step ' + nextStepNum + ' of ' + chain.length + ': ' + nextStepObj.stageName + ' (' + nextApprover + ')';
+
+        // Notify next approver
+        const nextReqObj = mapRowToRequestObject_(targetRow, targetRowIndex);
+        nextReqObj.status = newStatus;
+        nextReqObj.currentApprover = newCurrentApprover;
+        if (nextApprover) {
+          sendApproverNotificationEmail_(nextApprover.split(',').map(s => s.trim()), nextReqObj);
+        }
+
+        // Notify submitter of step progress
+        sendStepAdvancedEmail_([advisorEmail, submitterEmail].filter(Boolean), nextReqObj, currentStepObj.stageName, nextStepObj.stageName);
+
+      } else {
+        // Final approval: Option B -> Google Calendar Synchronization!
+        newStatus = CONFIG.STATUS.APPROVED;
+        newCurrentApprover = 'Complete';
+        existingLog += '\n' + timestampStr + ': All ' + chain.length + ' approval stages complete. Synchronizing to Google Calendar.';
+
+        const calendarResult = createCalendarEventsForRequest_(targetRow);
+        calendarEventIds = calendarResult.eventIds.join(', ');
+        calendarSyncStatus = calendarResult.success ? 'Synced' : 'Sync Error: ' + calendarResult.error;
+
+        if (calendarResult.success) {
+          existingLog += '\n' + timestampStr + ': Google Calendar events synced (' + calendarResult.eventIds.length + ' date(s))';
+        }
+
+        // Send final completion emails
+        const finalReqObj = mapRowToRequestObject_(targetRow, targetRowIndex);
+        finalReqObj.status = newStatus;
+        finalReqObj.currentApprover = newCurrentApprover;
+        finalReqObj.calendarSyncStatus = calendarSyncStatus;
+        sendApprovalCompletedEmail_([advisorEmail, submitterEmail].filter(Boolean), approversDir.calendarEditors, finalReqObj, comments);
       }
-
-      // Update row in sheet
-      respSheet.getRange(targetRowIndex, COL.OVERALL_STATUS + 1).setValue(newStatus);
-      respSheet.getRange(targetRowIndex, COL.CURRENT_APPROVER + 1).setValue(newCurrentApprover);
-      respSheet.getRange(targetRowIndex, COL.APPROVAL_LOG + 1).setValue(existingLog);
-      respSheet.getRange(targetRowIndex, COL.CALENDAR_EVENT_IDS + 1).setValue(calendarEventIds);
-      respSheet.getRange(targetRowIndex, COL.CALENDAR_SYNC_STATUS + 1).setValue(calendarSyncStatus);
-      respSheet.getRange(targetRowIndex, COL.LAST_UPDATED + 1).setValue(now);
-
-      // Build updated request object
-      targetRow[COL.OVERALL_STATUS] = newStatus;
-      targetRow[COL.CURRENT_APPROVER] = newCurrentApprover;
-      targetRow[COL.APPROVAL_LOG] = existingLog;
-      targetRow[COL.CALENDAR_EVENT_IDS] = calendarEventIds;
-      targetRow[COL.CALENDAR_SYNC_STATUS] = calendarSyncStatus;
-      targetRow[COL.LAST_UPDATED] = now;
-      const updatedReq = mapRowToRequestObject_(targetRow, targetRowIndex);
-
-      // Send approval confirmation emails to Advisor, Submitter, and Ops Secretaries
-      const recipients = [advisorEmail, submitterEmail].filter(Boolean);
-      sendApprovalCompletedEmail_(recipients, approversDir.calendarEditors, updatedReq, comments);
-
-      return {
-        success: true,
-        message: 'Request ' + requestId + ' approved and calendar event(s) synced.',
-        request: updatedReq
-      };
 
     } else if (action === 'deny') {
       newStatus = CONFIG.STATUS.DENIED;
@@ -2137,6 +2246,36 @@ function sendApprovalCompletedEmail_(applicantEmails, secretaryEmails, req, comm
   body += generateEmailFooter_();
 
   GmailApp.sendEmail(allRecipients.join(','), subject, '', {
+    htmlBody: body,
+    name: 'DBHS Activities Portal'
+  });
+}
+
+/**
+ * Sends Progress Update to Submitter & Advisor when an approval step completes and advances.
+ */
+function sendStepAdvancedEmail_(applicantEmails, req, completedStage, nextStage) {
+  if (!applicantEmails || applicantEmails.length === 0) return;
+  const portalUrl = getWebAppUrl() + '?id=' + req.requestId;
+  const subject = '[Progress Update] ' + req.requestId + ' Approved at ' + completedStage + ' - ' + req.eventTitle;
+
+  let body = generateEmailHeader_('Approval Progress Update');
+  body += '<div style="background-color: #f1e9f9; border-left: 5px solid #6f31a0; padding: 12px 16px; margin-bottom: 20px; border-radius: 4px;">' +
+    '<strong style="color: #6f31a0; font-size: 15px;">Stage Complete: ' + completedStage + ' Approved</strong>' +
+    '<div style="color: #333; margin-top: 4px;">Your activity request <strong>' + req.requestId + '</strong> has successfully passed review at <strong>' + completedStage + '</strong> and has advanced to <strong>' + nextStage + '</strong> for review.</div>' +
+  '</div>';
+
+  body += generateRequestSummaryHtmlTable_(req, false);
+
+  body += '<div style="text-align: center; margin: 24px 0 16px 0;">' +
+    '<a href="' + portalUrl + '" style="background-color: ' + CONFIG.COLORS.PRIMARY + '; color: #ffffff; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: 700; font-size: 14px; display: inline-block;">' +
+      'Track Progress in DBHS Portal &rarr;' +
+    '</a>' +
+  '</div>';
+
+  body += generateEmailFooter_();
+
+  GmailApp.sendEmail(applicantEmails.join(','), subject, '', {
     htmlBody: body,
     name: 'DBHS Activities Portal'
   });

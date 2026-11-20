@@ -28,7 +28,8 @@ function getMonthYearString(dateVal) {
 export default function ApproverDashboard({ 
   requests = [], 
   currentUser, 
-  onRefresh 
+  onRefresh,
+  approvalChain = []
 }) {
   const [activeTab, setActiveTab] = useState('Pending'); // 'Pending' | 'Approved' | 'Changes Requested' | 'All'
   const [locationFilter, setLocationFilter] = useState('All');
@@ -36,21 +37,33 @@ export default function ApproverDashboard({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRequest, setSelectedRequest] = useState(null);
 
+  const userEmail = (currentUser?.email || '').toLowerCase().trim();
+  const isSuperAdmin = currentUser?.roles?.isAdmin || 
+    userEmail.startsWith('kwendland') || 
+    userEmail.startsWith('jwai') || 
+    currentUser?.roles?.isOpsSecretary;
+
   // 1. Determine approver's assigned locations
   const userLocations = useMemo(() => {
     return (currentUser?.locations || []).map(l => l.trim());
   }, [currentUser]);
 
-  const isAreaRestricted = !currentUser?.roles?.isAdmin && userLocations.length > 0;
-
-  // Filter requests strictly to approver's locations first
+  // Filter requests approver is concerned with:
+  // - Super admins see all requests
+  // - Approvers see requests where they are the current approver, or in the approval log, or assigned venue
   const scopedRequests = useMemo(() => {
+    if (isSuperAdmin) return requests;
     return requests.filter(r => {
-      if (!isAreaRestricted) return true;
-      const reqLoc = (r.location || '').toLowerCase().trim();
-      return userLocations.some(ul => ul.toLowerCase().trim() === reqLoc);
+      const currApprover = (r.currentApprover || '').toLowerCase();
+      const approvalLog = (r.approvalLog || '').toLowerCase();
+      const isCurrent = currApprover.includes(userEmail);
+      const isPast = approvalLog.includes(userEmail);
+      const isVenue = userLocations.some(
+        ul => ul.toLowerCase().trim() === (r.location || '').toLowerCase().trim()
+      );
+      return isCurrent || isPast || isVenue;
     });
-  }, [requests, isAreaRestricted, userLocations]);
+  }, [requests, isSuperAdmin, userEmail, userLocations]);
 
   // Extract distinct months for the month dropdown filter
   const availableMonths = useMemo(() => {
@@ -65,7 +78,7 @@ export default function ApproverDashboard({
   // Calculate counts for tabs
   const counts = useMemo(() => {
     return {
-      pending: scopedRequests.filter(r => r.status === 'Pending').length,
+      pending: scopedRequests.filter(r => String(r.status || '').toLowerCase().includes('pending')).length,
       approved: scopedRequests.filter(r => r.status === 'Approved').length,
       changes: scopedRequests.filter(r => r.status === 'Changes Requested').length,
       all: scopedRequests.length
@@ -76,7 +89,8 @@ export default function ApproverDashboard({
   const filteredRequests = useMemo(() => {
     return scopedRequests.filter(r => {
       // Tab filter (Pending vs Approved vs Changes vs All)
-      if (activeTab === 'Pending' && r.status !== 'Pending') return false;
+      const isPending = String(r.status || '').toLowerCase().includes('pending');
+      if (activeTab === 'Pending' && !isPending) return false;
       if (activeTab === 'Approved' && r.status !== 'Approved') return false;
       if (activeTab === 'Changes Requested' && r.status !== 'Changes Requested') return false;
 
@@ -370,7 +384,7 @@ export default function ApproverDashboard({
                   </span>
 
                   <button className="bg-[#6f31a0] group-hover:bg-purple-800 text-white text-xs font-bold px-3.5 py-1.5 rounded-xl shadow-sm transition flex items-center gap-1">
-                    {req.status === 'Pending' ? 'Review & Decide' : 'View Details'}
+                    {String(req.status || '').toLowerCase().includes('pending') ? 'Review & Decide' : 'View Details'}
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </div>
@@ -387,6 +401,7 @@ export default function ApproverDashboard({
         onClose={() => setSelectedRequest(null)}
         currentUser={currentUser}
         isApproverView={true}
+        approvalChain={approvalChain}
         onActionComplete={onRefresh}
       />
     </div>
