@@ -1,0 +1,12 @@
+node_modules/**
+src/**
+public/**
+dist/**
+.git/**
+package.json
+package-lock.json
+vite.config.js
+tailwind.config.js
+postcss.config.js
+README.md
+index.html

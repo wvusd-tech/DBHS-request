@@ -1,0 +1,836 @@
+<script>
+  /**
+   * DBHS Activities Request Portal - Frontend Controller
+   */
+
+  // Global State
+  const portalState = {
+    currentUser: null,
+    requests: [],
+    filteredRequests: [],
+    activeTab: 'all',          // 'all' | 'myApprovals' | 'secretaryTab'
+    selectedRequest: null,
+    pendingAction: null,       // { requestId, action: 'approve'|'deny'|'request_changes' }
+    deepLinkedId: null
+  };
+
+  // Bootstrap Modals & Toast Instances
+  let detailsModalInstance = null;
+  let secretaryModalInstance = null;
+  let actionConfirmModalInstance = null;
+  let toastInstance = null;
+
+  // Initialize on DOM Ready
+  document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Bootstrap Modals
+    detailsModalInstance = new bootstrap.Modal(document.getElementById('requestDetailsModal'));
+    secretaryModalInstance = new bootstrap.Modal(document.getElementById('secretaryEditorModal'));
+    actionConfirmModalInstance = new bootstrap.Modal(document.getElementById('actionConfirmModal'));
+
+    const toastEl = document.getElementById('liveToast');
+    if (toastEl) {
+      toastInstance = new bootstrap.Toast(toastEl, { delay: 4500 });
+    }
+
+    // Check for deep-linked Request ID from query params
+    if (window.INITIAL_REQUEST_ID) {
+      portalState.deepLinkedId = window.INITIAL_REQUEST_ID.trim().toUpperCase();
+    }
+
+    loadPortalData(false);
+  });
+
+  /**
+   * Fetches full portal data from Google Apps Script backend.
+   */
+  function loadPortalData(isRefresh) {
+    const spinner = document.getElementById('loadingSpinner');
+    const content = document.getElementById('portalContent');
+    const refreshIcon = document.getElementById('refreshIcon');
+
+    if (isRefresh && refreshIcon) {
+      refreshIcon.classList.add('spin-animation');
+    }
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        if (refreshIcon) refreshIcon.classList.remove('spin-animation');
+        spinner.classList.add('d-none');
+        content.classList.remove('d-none');
+
+        handlePortalDataLoaded(response);
+      })
+      .withFailureHandler(function(error) {
+        if (refreshIcon) refreshIcon.classList.remove('spin-animation');
+        spinner.classList.add('d-none');
+        showToast('Error loading activities: ' + (error.message || error), 'danger');
+      })
+      .getPortalData();
+  }
+
+  /**
+   * Processes server payload and populates UI.
+   */
+  function handlePortalDataLoaded(data) {
+    portalState.currentUser = data.currentUser;
+    portalState.requests = data.requests || [];
+
+    // 1. Render User Email and Role Badges
+    const userEmailSpan = document.getElementById('userEmailDisplay');
+    if (userEmailSpan) {
+      userEmailSpan.textContent = data.currentUser.email || 'User';
+    }
+
+    renderUserRoleBadges(data.currentUser);
+
+    // 2. Render Stat Metric Cards
+    document.getElementById('statTotal').textContent = data.stats.total || 0;
+    document.getElementById('statPending').textContent = data.stats.pending || 0;
+    document.getElementById('statApproved').textContent = data.stats.approved || 0;
+    document.getElementById('statSynced').textContent = data.stats.calendarSynced || 0;
+
+    // 3. Show Ops Secretary Navigation Tab & Banner if authorized
+    const isSecretaryOrAdmin = data.currentUser.isOpsSecretary || data.currentUser.isAdmin;
+    const secTabItem = document.getElementById('secretaryTabNavItem');
+    const secBanner = document.getElementById('secretaryBanner');
+
+    if (secTabItem && isSecretaryOrAdmin) {
+      secTabItem.classList.remove('d-none');
+    }
+    if (secBanner && data.currentUser.isOpsSecretary) {
+      secBanner.classList.remove('d-none');
+    }
+
+    // 4. Update Tab Badges
+    document.getElementById('badgeAllCount').textContent = portalState.requests.length;
+
+    // Count pending items requiring current user's review
+    const pendingMyReview = portalState.requests.filter(r => isPendingForCurrentUser(r));
+    document.getElementById('badgePendingReviewCount').textContent = pendingMyReview.length;
+
+    const approvedCount = portalState.requests.filter(r => r.status === 'Approved').length;
+    document.getElementById('badgeSecretaryCount').textContent = approvedCount;
+
+    // 5. Populate Location Filter Options dynamically if needed
+    if (data.approverLocations && data.approverLocations.length > 0) {
+      const locSelect = document.getElementById('locationFilter');
+      const currentVal = locSelect.value;
+      // Preserve standard locations, but ensure all backend locations exist
+      data.approverLocations.forEach(loc => {
+        let exists = false;
+        for (let i = 0; i < locSelect.options.length; i++) {
+          if (locSelect.options[i].value.toLowerCase() === loc.toLowerCase()) {
+            exists = true;
+            break;
+          }
+        }
+        if (!exists) {
+          const opt = document.createElement('option');
+          opt.value = loc;
+          opt.textContent = loc;
+          locSelect.appendChild(opt);
+        }
+      });
+      locSelect.value = currentVal;
+    }
+
+    // 6. Handle Deep-Linked Request ID if present
+    if (portalState.deepLinkedId) {
+      const targetReq = portalState.requests.find(r => r.requestId.toUpperCase() === portalState.deepLinkedId);
+      if (targetReq) {
+        document.getElementById('deepLinkAlert').classList.remove('d-none');
+        document.getElementById('deepLinkIdSpan').textContent = targetReq.requestId + ' - ' + targetReq.eventTitle;
+        document.getElementById('searchInput').value = targetReq.requestId;
+        openRequestDetails(targetReq.requestId);
+      }
+    }
+
+    applyFilters();
+  }
+
+  /**
+   * Checks if a request is pending and waiting on current user's approval.
+   */
+  function isPendingForCurrentUser(req) {
+    if (!portalState.currentUser) return false;
+    if (req.status !== 'Pending') return false;
+
+    const userEmail = portalState.currentUser.email.toLowerCase();
+    const userLocs = (portalState.currentUser.locations || []).map(l => l.toLowerCase());
+    const reqLoc = (req.location || '').toLowerCase();
+
+    // Check if user is approver for this location
+    if (userLocs.includes(reqLoc)) return true;
+
+    // Check if user email is explicitly listed in current approver column
+    const curApprover = (req.currentApprover || '').toLowerCase();
+    if (curApprover.includes(userEmail)) return true;
+
+    // Admin can review any pending request
+    if (portalState.currentUser.isAdmin) return true;
+
+    return false;
+  }
+
+  /**
+   * Checks if user has permission to approve/deny this request.
+   */
+  function canUserApproveRequest(req) {
+    if (!portalState.currentUser) return false;
+    if (portalState.currentUser.isAdmin || portalState.currentUser.isOpsSecretary) return true;
+
+    const userEmail = portalState.currentUser.email.toLowerCase();
+    const userLocs = (portalState.currentUser.locations || []).map(l => l.toLowerCase());
+    const reqLoc = (req.location || '').toLowerCase();
+
+    if (userLocs.includes(reqLoc)) return true;
+
+    const curApprover = (req.currentApprover || '').toLowerCase();
+    if (curApprover.includes(userEmail)) return true;
+
+    return false;
+  }
+
+  /**
+   * Renders role badges next to user email.
+   */
+  function renderUserRoleBadges(user) {
+    const container = document.getElementById('roleBadgeContainer');
+    if (!container) return;
+    container.innerHTML = '';
+
+    if (user.isOpsSecretary) {
+      container.innerHTML += '<span class="badge bg-warning text-dark me-1"><i class="bi bi-calendar-check me-1"></i>Ops Secretary</span>';
+    }
+    if (user.isApprover) {
+      container.innerHTML += '<span class="badge bg-light text-purple me-1" style="color: #6f31a0 !important;"><i class="bi bi-shield-check me-1"></i>Location Approver</span>';
+    }
+    if (user.isAdmin && !user.isOpsSecretary) {
+      container.innerHTML += '<span class="badge bg-info text-dark me-1"><i class="bi bi-gear-fill me-1"></i>Admin</span>';
+    }
+  }
+
+  /**
+   * Switches active navigation tab.
+   */
+  function switchTab(tabKey) {
+    portalState.activeTab = tabKey;
+
+    document.querySelectorAll('#portalTabs .nav-link').forEach(btn => btn.classList.remove('active'));
+
+    if (tabKey === 'all') {
+      document.getElementById('tabAllRequests').classList.add('active');
+    } else if (tabKey === 'myApprovals') {
+      document.getElementById('tabMyApprovals').classList.add('active');
+    } else if (tabKey === 'secretaryTab') {
+      const secTab = document.getElementById('tabSecretary');
+      if (secTab) secTab.classList.add('active');
+    }
+
+    applyFilters();
+  }
+
+  /**
+   * Filters requests based on active tab, search text, status, and location.
+   */
+  function applyFilters() {
+    const searchVal = document.getElementById('searchInput').value.trim().toLowerCase();
+    const statusVal = document.getElementById('statusFilter').value;
+    const locationVal = document.getElementById('locationFilter').value;
+
+    let list = portalState.requests.slice();
+
+    // 1. Tab-level Filter
+    if (portalState.activeTab === 'myApprovals') {
+      list = list.filter(r => isPendingForCurrentUser(r));
+    } else if (portalState.activeTab === 'secretaryTab') {
+      list = list.filter(r => r.status === 'Approved');
+    }
+
+    // 2. Search Filter
+    if (searchVal) {
+      list = list.filter(r => {
+        return (r.requestId && r.requestId.toLowerCase().includes(searchVal)) ||
+               (r.eventTitle && r.eventTitle.toLowerCase().includes(searchVal)) ||
+               (r.requestingGroup && r.requestingGroup.toLowerCase().includes(searchVal)) ||
+               (r.advisor && r.advisor.toLowerCase().includes(searchVal)) ||
+               (r.advisorEmail && r.advisorEmail.toLowerCase().includes(searchVal)) ||
+               (r.location && r.location.toLowerCase().includes(searchVal)) ||
+               (r.eventDescription && r.eventDescription.toLowerCase().includes(searchVal));
+      });
+    }
+
+    // 3. Status Filter
+    if (statusVal) {
+      list = list.filter(r => r.status === statusVal);
+    }
+
+    // 4. Location Filter
+    if (locationVal) {
+      list = list.filter(r => (r.location || '').toLowerCase() === locationVal.toLowerCase());
+    }
+
+    portalState.filteredRequests = list;
+    renderRequestsTable();
+  }
+
+  /**
+   * Resets all search and filter inputs.
+   */
+  function resetFilters() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('statusFilter').value = '';
+    document.getElementById('locationFilter').value = '';
+    applyFilters();
+  }
+
+  /**
+   * Clears deep-link filter banner.
+   */
+  function clearDeepLinkFilter() {
+    portalState.deepLinkedId = null;
+    document.getElementById('deepLinkAlert').classList.add('d-none');
+    resetFilters();
+  }
+
+  /**
+   * Renders rows into the HTML requests table.
+   */
+  function renderRequestsTable() {
+    const tbody = document.getElementById('requestsTableBody');
+    const emptyState = document.getElementById('emptyState');
+    tbody.innerHTML = '';
+
+    if (portalState.filteredRequests.length === 0) {
+      emptyState.classList.remove('d-none');
+      return;
+    }
+
+    emptyState.classList.add('d-none');
+
+    const isSecretaryOrAdmin = portalState.currentUser && (portalState.currentUser.isOpsSecretary || portalState.currentUser.isAdmin);
+
+    portalState.filteredRequests.forEach(req => {
+      const tr = document.createElement('tr');
+
+      // Status Badge HTML
+      const statusBadgeHtml = getStatusBadgeHtml(req.status);
+
+      // Calendar Sync Badge HTML
+      let calBadgeHtml = '<span class="text-muted small">&mdash;</span>';
+      if (req.calendarSyncStatus === 'Synced') {
+        calBadgeHtml = '<span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25"><i class="bi bi-calendar-check-fill me-1"></i>Synced</span>';
+      } else if (req.status === 'Approved') {
+        calBadgeHtml = '<span class="badge bg-warning bg-opacity-10 text-warning border border-warning border-opacity-25"><i class="bi bi-clock me-1"></i>Unsynced</span>';
+      }
+
+      // Reoccurring indicator
+      const reoccurringHtml = req.isReoccurring === 'Yes'
+        ? '<span class="badge bg-light text-primary border ms-1" title="Reoccurring Activity: ' + escapeHtml(req.reoccurringDates) + '"><i class="bi bi-repeat me-1"></i>Reoccurring</span>'
+        : '';
+
+      // Action Buttons
+      let actionBtnsHtml = '<button class="btn btn-sm btn-dbhs-outline py-1 px-2" onclick="openRequestDetails(\'' + req.requestId + '\')"><i class="bi bi-eye me-1"></i>Details</button>';
+
+      // If user is Secretary/Admin and request is Approved, provide Calendar Editor shortcut
+      if (isSecretaryOrAdmin && req.status === 'Approved') {
+        actionBtnsHtml += ' <button class="btn btn-sm btn-outline-success py-1 px-2" onclick="openSecretaryEditor(\'' + req.requestId + '\')" title="Edit Schedule & Sync Calendar"><i class="bi bi-calendar-range"></i></button>';
+      }
+
+      // If item requires user's review, highlight button
+      if (isPendingForCurrentUser(req)) {
+        actionBtnsHtml = '<button class="btn btn-sm btn-warning fw-bold py-1 px-2" onclick="openRequestDetails(\'' + req.requestId + '\')"><i class="bi bi-shield-check me-1"></i>Review</button> ' + actionBtnsHtml;
+      }
+
+      tr.innerHTML = `
+        <td>
+          <span class="fw-bold text-dark font-monospace">${escapeHtml(req.requestId)}</span>
+          <div class="text-muted" style="font-size: 0.75rem;">${escapeHtml(req.timestamp)}</div>
+        </td>
+        <td>
+          <div class="fw-bold text-dark">${escapeHtml(req.eventTitle)} ${reoccurringHtml}</div>
+          <div class="text-muted small text-truncate" style="max-width: 280px;">${escapeHtml(req.eventDescription || 'No description provided')}</div>
+        </td>
+        <td>
+          <div class="fw-bold text-primary">${escapeHtml(req.location)}</div>
+          <div class="text-muted small">${escapeHtml(req.eventDate)}</div>
+        </td>
+        <td>
+          <div class="fw-bold">${escapeHtml(req.requestingGroup)}</div>
+          <div class="text-muted small">${escapeHtml(req.advisor)}</div>
+        </td>
+        <td>${statusBadgeHtml}</td>
+        <td>${calBadgeHtml}</td>
+        <td class="text-end text-nowrap">${actionBtnsHtml}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  /**
+   * Helper to generate styled status badge HTML.
+   */
+  function getStatusBadgeHtml(status) {
+    if (status === 'Approved') {
+      return '<span class="badge-status badge-status-approved"><i class="bi bi-check-circle-fill"></i>Approved</span>';
+    } else if (status === 'Denied') {
+      return '<span class="badge-status badge-status-denied"><i class="bi bi-x-circle-fill"></i>Denied</span>';
+    } else if (status === 'Changes Requested') {
+      return '<span class="badge-status badge-status-changes"><i class="bi bi-pencil-square"></i>Changes Req.</span>';
+    }
+    return '<span class="badge-status badge-status-pending"><i class="bi bi-clock-fill"></i>Pending</span>';
+  }
+
+
+  // =========================================================================
+  // MODAL 1: REQUEST DETAILS VIEW & STATUS TRACKER
+  // =========================================================================
+
+  /**
+   * Opens Request Details Modal and sets up Visual Status Tracker & Branching fields.
+   */
+  function openRequestDetails(requestId) {
+    const req = portalState.requests.find(r => r.requestId.toUpperCase() === String(requestId).trim().toUpperCase());
+    if (!req) {
+      showToast('Request not found: ' + requestId, 'warning');
+      return;
+    }
+
+    portalState.selectedRequest = req;
+
+    // Header Badge & Title
+    document.getElementById('modalRequestIdBadge').textContent = req.requestId;
+    document.getElementById('modalEventTitle').textContent = req.eventTitle;
+
+    // Setup Visual Status Tracker
+    updateVisualStatusTracker(req);
+
+    // Card 1: General Info
+    document.getElementById('modalReqGroup').textContent = req.requestingGroup || '-';
+    document.getElementById('modalAdvisor').textContent = req.advisor || '-';
+    document.getElementById('modalAdvisorEmail').textContent = req.advisorEmail || '-';
+    document.getElementById('modalSubmitterEmail').textContent = req.submitterEmail || '-';
+    document.getElementById('modalLocation').textContent = req.location || '-';
+    document.getElementById('modalEventDate').textContent = req.eventDate || '-';
+    document.getElementById('modalArrivalTime').textContent = req.arrivalTime || 'None specified';
+    document.getElementById('modalEventTimes').textContent = (req.startTime || '') + (req.endTime ? ' to ' + req.endTime : '');
+    document.getElementById('modalEventDesc').textContent = req.eventDescription || 'No description provided.';
+
+    // Reoccurring Dates
+    const reoccurringSection = document.getElementById('modalReoccurringSection');
+    if (req.isReoccurring === 'Yes' && req.reoccurringDates) {
+      reoccurringSection.classList.remove('d-none');
+      document.getElementById('modalReoccurringDates').textContent = req.reoccurringDates;
+    } else {
+      reoccurringSection.classList.add('d-none');
+    }
+
+    // Card 2: Set-Up Requirements (Branching)
+    const setupCard = document.getElementById('modalSetupCard');
+    if (req.setupRequired === 'Yes') {
+      setupCard.classList.remove('d-none');
+      document.getElementById('modalFacilityDuration').textContent = req.facilityDuration || 'Standard Duration';
+      document.getElementById('modalNumChairs').textContent = req.numChairs || '0';
+      document.getElementById('modalNumTables').textContent = req.numTables || '0';
+      document.getElementById('modalPodiumStage').textContent =
+        (req.podium ? 'Podium: ' + req.podium + '; ' : '') + (req.stage ? 'Stage: ' + req.stage : (req.podium ? '' : 'None'));
+      document.getElementById('modalRisersCoffee').textContent =
+        (req.risers ? 'Risers: ' + req.risers + '; ' : '') + (req.coffeePot ? 'Coffee Pot: ' + req.coffeePot : (req.risers ? '' : 'None'));
+      document.getElementById('modalPaSystem').textContent = req.paSystem || 'None';
+      document.getElementById('modalProjectorScreen').textContent =
+        (req.projector ? 'Projector: ' + req.projector + '; ' : '') + (req.screen ? 'Screen: ' + req.screen : (req.projector ? '' : 'None'));
+      document.getElementById('modalMicrophones').textContent = req.microphones || 'None';
+      document.getElementById('modalStageCurtain').textContent =
+        (req.stageUsage ? 'Stage: ' + req.stageUsage + '; ' : '') + (req.mainCurtain ? 'Curtain: ' + req.mainCurtain : (req.stageUsage ? '' : 'None'));
+
+      // Additional Info
+      const addInfoSec = document.getElementById('modalAdditionalInfoSection');
+      if (req.additionalInfo) {
+        addInfoSec.classList.remove('d-none');
+        document.getElementById('modalAdditionalInfo').textContent = req.additionalInfo;
+      } else {
+        addInfoSec.classList.add('d-none');
+      }
+
+      // Diagram Link
+      const diagramSec = document.getElementById('modalDiagramSection');
+      if (req.diagramUrl) {
+        diagramSec.classList.remove('d-none');
+        document.getElementById('modalDiagramUrl').innerHTML =
+          `<a href="${escapeHtml(req.diagramUrl)}" target="_blank" class="btn btn-sm btn-outline-primary fw-bold">
+            <i class="bi bi-file-earmark-image me-1"></i> View Uploaded Diagram &nearr;
+          </a>`;
+      } else {
+        diagramSec.classList.add('d-none');
+      }
+    } else {
+      setupCard.classList.add('d-none');
+    }
+
+    // Card 3: Revenue Potential Form (Branching)
+    const revCard = document.getElementById('modalRevenueCard');
+    if (req.revenueFormNeeded === 'Yes') {
+      revCard.classList.remove('d-none');
+      document.getElementById('modalRevAccount').textContent = req.accountNum || '-';
+      document.getElementById('modalRevStartDate').textContent = req.salesStartDate || '-';
+      document.getElementById('modalRevEndDate').textContent = req.salesEndDate || '-';
+      document.getElementById('modalRevUnitsCost').textContent =
+        (req.unitsPurchased || '0') + ' units @ ' + (req.costEach || '$0');
+      document.getElementById('modalRevTotalNetCost').textContent = req.totalNetCost || '$0';
+      document.getElementById('modalRevProjectedSales').textContent =
+        (req.projectedSalesUnits || '0') + ' units @ ' + (req.projectedSalesAmountEach || '$0') + ' (Total: ' + (req.projectedSalesTotal || '$0') + ')';
+      document.getElementById('modalRevGrossIncome').textContent = req.projectedGrossIncome || '$0';
+      document.getElementById('modalRevExpenses').textContent = req.estimatedExpenses || '$0';
+      document.getElementById('modalRevNetProfit').textContent = req.potentialNetProfit || '$0';
+    } else {
+      revCard.classList.add('d-none');
+    }
+
+    // Card 4: Workflow Details & Calendar
+    document.getElementById('modalCurrentApprover').textContent = req.currentApprover || '-';
+    document.getElementById('modalCalendarSyncStatus').textContent = req.calendarSyncStatus || 'Not Synced';
+    document.getElementById('modalLastUpdated').textContent = req.lastUpdated || '-';
+
+    const calIdsSec = document.getElementById('modalCalendarIdsSection');
+    if (req.calendarEventIds) {
+      calIdsSec.classList.remove('d-none');
+      document.getElementById('modalCalendarIds').textContent = req.calendarEventIds;
+    } else {
+      calIdsSec.classList.add('d-none');
+    }
+
+    document.getElementById('modalApprovalLog').textContent = req.approvalLog || 'No log entries recorded yet.';
+
+    // Configure Action Buttons
+    const actionsContainer = document.getElementById('approverActionsContainer');
+    if (canUserApproveRequest(req) && (req.status === 'Pending' || req.status === 'Changes Requested')) {
+      actionsContainer.classList.remove('d-none');
+    } else {
+      actionsContainer.classList.add('d-none');
+    }
+
+    detailsModalInstance.show();
+  }
+
+  /**
+   * Updates multi-step Visual Status Tracker.
+   */
+  function updateVisualStatusTracker(req) {
+    const s1 = document.getElementById('trackStep1');
+    const s2 = document.getElementById('trackStep2');
+    const s3 = document.getElementById('trackStep3');
+    const s4 = document.getElementById('trackStep4');
+
+    // Reset classes
+    [s1, s2, s3, s4].forEach(s => {
+      s.className = 'step-item';
+    });
+
+    // Step 1: Always Completed upon submission
+    s1.classList.add('completed');
+    document.getElementById('trackStep1Time').textContent = req.timestamp || 'Form Submitted';
+
+    // Step 2: Location Review
+    document.getElementById('trackStep2Approver').textContent = req.location ? req.location + ' Approver' : 'Approver';
+
+    if (req.status === 'Pending') {
+      s2.classList.add('active');
+      document.getElementById('trackStep3Sync').textContent = 'Awaiting Approval';
+      document.getElementById('trackStep4Final').textContent = 'Pending Review';
+    } else if (req.status === 'Changes Requested') {
+      s2.classList.add('active');
+      document.getElementById('trackStep2Approver').textContent = 'Changes Requested';
+      document.getElementById('trackStep3Sync').textContent = 'Paused';
+      document.getElementById('trackStep4Final').textContent = 'Changes Needed';
+    } else if (req.status === 'Denied') {
+      s2.classList.add('denied');
+      s4.classList.add('denied');
+      document.getElementById('trackStep2Approver').textContent = 'Request Denied';
+      document.getElementById('trackStep3Sync').textContent = 'Cancelled';
+      document.getElementById('trackStep4Final').textContent = 'Denied';
+    } else if (req.status === 'Approved') {
+      s2.classList.add('completed');
+      document.getElementById('trackStep2Approver').textContent = 'Approved';
+
+      // Step 3: Calendar Sync
+      if (req.calendarSyncStatus === 'Synced') {
+        s3.classList.add('completed');
+        document.getElementById('trackStep3Sync').textContent = 'Synced to Calendar';
+        s4.classList.add('completed');
+        document.getElementById('trackStep4Final').textContent = 'Complete & Scheduled';
+      } else {
+        s3.classList.add('active');
+        document.getElementById('trackStep3Sync').textContent = 'Syncing Calendar...';
+        s4.classList.add('active');
+        document.getElementById('trackStep4Final').textContent = 'Pending Sync';
+      }
+    }
+  }
+
+
+  // =========================================================================
+  // MODAL 2: OPS SECRETARY CALENDAR & SCHEDULE EDITOR
+  // =========================================================================
+
+  /**
+   * Opens Ops Secretary Calendar Editor for an approved activity.
+   */
+  function openSecretaryEditor(requestId) {
+    const req = portalState.requests.find(r => r.requestId.toUpperCase() === String(requestId).trim().toUpperCase());
+    if (!req) return;
+
+    portalState.selectedRequest = req;
+
+    document.getElementById('editRequestId').value = req.requestId;
+    document.getElementById('editEventTitle').value = req.eventTitle || '';
+    document.getElementById('editLocation').value = req.location || '';
+
+    // Convert date string MM/dd/yyyy to YYYY-MM-DD for date input
+    if (req.eventDate) {
+      const parts = req.eventDate.split('/');
+      if (parts.length === 3) {
+        document.getElementById('editEventDate').value = `${parts[2]}-${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}`;
+      } else {
+        document.getElementById('editEventDate').value = req.eventDate;
+      }
+    } else {
+      document.getElementById('editEventDate').value = '';
+    }
+
+    document.getElementById('editStartTime').value = req.startTime || '';
+    document.getElementById('editEndTime').value = req.endTime || '';
+    document.getElementById('editAdditionalDates').value = req.reoccurringDates || '';
+    document.getElementById('editDescription').value = req.eventDescription || '';
+    document.getElementById('editCurrentCalendarIds').textContent = req.calendarEventIds || 'None';
+
+    secretaryModalInstance.show();
+  }
+
+  /**
+   * Handles submission of Secretary Calendar Editor Form.
+   */
+  function handleSecretaryFormSubmit(e) {
+    e.preventDefault();
+
+    const saveBtn = document.getElementById('btnSaveSchedule');
+    const spinner = document.getElementById('saveScheduleSpinner');
+    const icon = document.getElementById('saveScheduleIcon');
+
+    saveBtn.disabled = true;
+    spinner.classList.remove('d-none');
+    icon.classList.add('d-none');
+
+    const payload = {
+      requestId: document.getElementById('editRequestId').value,
+      eventTitle: document.getElementById('editEventTitle').value,
+      location: document.getElementById('editLocation').value,
+      eventDate: document.getElementById('editEventDate').value,
+      eventStartTime: document.getElementById('editStartTime').value,
+      eventEndTime: document.getElementById('editEndTime').value,
+      additionalDates: document.getElementById('editAdditionalDates').value,
+      eventDescription: document.getElementById('editDescription').value
+    };
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        saveBtn.disabled = false;
+        spinner.classList.add('d-none');
+        icon.classList.remove('d-none');
+        secretaryModalInstance.hide();
+
+        showToast(response.message || 'Schedule and calendar synchronized successfully!', 'success');
+
+        // Update in-memory request and UI
+        if (response.request) {
+          updateLocalRequest(response.request);
+        }
+      })
+      .withFailureHandler(function(err) {
+        saveBtn.disabled = false;
+        spinner.classList.add('d-none');
+        icon.classList.remove('d-none');
+        showToast('Error syncing schedule: ' + (err.message || err), 'danger');
+      })
+      .updateCalendarSchedule(payload);
+  }
+
+
+  // =========================================================================
+  // MODAL 3: APPROVAL ACTION FLOW (APPROVE, DENY, REQUEST CHANGES)
+  // =========================================================================
+
+  /**
+   * Opens confirmation modal with action-specific prompts.
+   */
+  function promptApprovalAction(actionType) {
+    if (!portalState.selectedRequest) return;
+    portalState.pendingAction = {
+      requestId: portalState.selectedRequest.requestId,
+      action: actionType
+    };
+
+    const header = document.getElementById('actionModalHeader');
+    const title = document.getElementById('actionModalTitle');
+    const msg = document.getElementById('actionModalMessage');
+    const commentsLabel = document.getElementById('actionCommentsLabel');
+    const submitBtn = document.getElementById('btnConfirmActionSubmit');
+    const textarea = document.getElementById('actionCommentsInput');
+    textarea.value = '';
+
+    // Remove existing theme classes
+    header.className = 'modal-header py-3 px-4';
+    submitBtn.className = 'btn fw-bold px-4';
+
+    if (actionType === 'approve') {
+      header.classList.add('bg-success');
+      title.textContent = 'Approve Activity & Schedule Calendar';
+      msg.innerHTML = `Are you sure you want to <strong>Approve</strong> request <strong>${portalState.selectedRequest.requestId}</strong>? This will automatically create Google Calendar events on the Master Activities Calendar and notify all parties.`;
+      commentsLabel.textContent = 'Approver Notes / Instructions (Optional):';
+      submitBtn.classList.add('btn-success');
+      submitBtn.textContent = 'Approve & Schedule';
+    } else if (actionType === 'deny') {
+      header.classList.add('bg-danger');
+      title.textContent = 'Deny Activity Request';
+      msg.innerHTML = `Are you sure you want to <strong>Deny</strong> request <strong>${portalState.selectedRequest.requestId}</strong>? The advisor and submitter will be notified.`;
+      commentsLabel.textContent = 'Reason for Denial (Required):';
+      submitBtn.classList.add('btn-danger');
+      submitBtn.textContent = 'Confirm Denial';
+    } else if (actionType === 'request_changes') {
+      header.classList.add('bg-warning');
+      header.classList.add('text-dark');
+      title.className = 'modal-title fw-bold text-dark mb-0';
+      title.textContent = 'Request Changes / More Info';
+      msg.innerHTML = `Send request <strong>${portalState.selectedRequest.requestId}</strong> back to the submitter and advisor for modifications.`;
+      commentsLabel.textContent = 'Requested Changes / Instructions (Required):';
+      submitBtn.classList.add('btn-warning');
+      submitBtn.textContent = 'Send Changes Request';
+    }
+
+    actionConfirmModalInstance.show();
+  }
+
+  /**
+   * Executes the confirmed approval action on the server.
+   */
+  function executeApprovalAction() {
+    if (!portalState.pendingAction) return;
+
+    const action = portalState.pendingAction.action;
+    const comments = document.getElementById('actionCommentsInput').value.trim();
+
+    if ((action === 'deny' || action === 'request_changes') && !comments) {
+      alert('Please provide comments or reason for this action.');
+      return;
+    }
+
+    const submitBtn = document.getElementById('btnConfirmActionSubmit');
+    const spinner = document.getElementById('actionSubmitSpinner');
+
+    submitBtn.disabled = true;
+    spinner.classList.remove('d-none');
+
+    const payload = {
+      requestId: portalState.pendingAction.requestId,
+      action: action,
+      comments: comments
+    };
+
+    google.script.run
+      .withSuccessHandler(function(response) {
+        submitBtn.disabled = false;
+        spinner.classList.add('d-none');
+        actionConfirmModalInstance.hide();
+        detailsModalInstance.hide();
+
+        showToast(response.message || 'Action executed successfully.', 'success');
+
+        if (response.request) {
+          updateLocalRequest(response.request);
+        }
+      })
+      .withFailureHandler(function(err) {
+        submitBtn.disabled = false;
+        spinner.classList.add('d-none');
+        showToast('Approval action failed: ' + (err.message || err), 'danger');
+      })
+      .handleApprovalAction(payload);
+  }
+
+  /**
+   * Updates local request in state array and re-renders table and stats.
+   */
+  function updateLocalRequest(updatedReq) {
+    const idx = portalState.requests.findIndex(r => r.requestId.toUpperCase() === updatedReq.requestId.toUpperCase());
+    if (idx !== -1) {
+      portalState.requests[idx] = updatedReq;
+    } else {
+      portalState.requests.unshift(updatedReq);
+    }
+
+    // Recalculate stats
+    const stats = {
+      total: portalState.requests.length,
+      pending: portalState.requests.filter(r => r.status === 'Pending').length,
+      approved: portalState.requests.filter(r => r.status === 'Approved').length,
+      denied: portalState.requests.filter(r => r.status === 'Denied').length,
+      changesRequested: portalState.requests.filter(r => r.status === 'Changes Requested').length,
+      calendarSynced: portalState.requests.filter(r => r.calendarSyncStatus === 'Synced').length
+    };
+
+    document.getElementById('statTotal').textContent = stats.total;
+    document.getElementById('statPending').textContent = stats.pending;
+    document.getElementById('statApproved').textContent = stats.approved;
+    document.getElementById('statSynced').textContent = stats.calendarSynced;
+
+    document.getElementById('badgeAllCount').textContent = stats.total;
+    document.getElementById('badgePendingReviewCount').textContent = portalState.requests.filter(r => isPendingForCurrentUser(r)).length;
+    document.getElementById('badgeSecretaryCount').textContent = stats.approved;
+
+    applyFilters();
+  }
+
+
+  // =========================================================================
+  // UTILITY HELPERS
+  // =========================================================================
+
+  /**
+   * Displays floating toast notification.
+   */
+  function showToast(message, type) {
+    const toastEl = document.getElementById('liveToast');
+    const toastMsg = document.getElementById('toastMessage');
+    if (!toastEl || !toastMsg) return;
+
+    toastEl.className = 'toast align-items-center text-white border-0 shadow-lg';
+    if (type === 'success') {
+      toastEl.classList.add('bg-success');
+    } else if (type === 'danger') {
+      toastEl.classList.add('bg-danger');
+    } else if (type === 'warning') {
+      toastEl.classList.add('bg-warning');
+      toastEl.classList.add('text-dark');
+    } else {
+      toastEl.classList.add('bg-primary');
+    }
+
+    toastMsg.innerHTML = message;
+    if (toastInstance) {
+      toastInstance.show();
+    }
+  }
+
+  /**
+   * Sanitizes string to prevent HTML injection / XSS.
+   */
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+</script>

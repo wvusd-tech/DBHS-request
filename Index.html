@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <base target="_top">
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DBHS Activities Request Portal</title>
+
+    <!-- Google Product Sans & Bootstrap Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css?family=Product+Sans:400,600,700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+
+    <?!= include('Stylesheet'); ?>
+  </head>
+  <body>
+
+    <!-- NAVBAR -->
+    <nav class="navbar navbar-expand-lg navbar-dark custom-navbar py-2 px-3">
+      <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center gap-3" href="#">
+          <img src="https://res.cloudinary.com/djv9u4054/image/upload/v1783632852/0-DBARBRAHMASWide_q8uled-removebg-preview_x7ta88.png"
+               alt="Diamond Bar High School" class="dbhs-brand-logo">
+          <div class="d-flex flex-column border-start ps-3 border-light border-opacity-25">
+            <span class="portal-title">DBHS Activities Portal</span>
+            <span class="portal-subtitle">Diamond Bar High School &bull; WVUSD</span>
+          </div>
+        </a>
+
+        <div class="d-flex align-items-center gap-2 mt-2 mt-lg-0">
+          <span id="roleBadgeContainer" class="d-none d-md-inline-block"></span>
+          <div class="bg-dark bg-opacity-25 rounded-pill px-3 py-1 text-white small d-flex align-items-center gap-2">
+            <i class="bi bi-person-circle text-warning"></i>
+            <span id="userEmailDisplay">Loading user...</span>
+          </div>
+          <button class="btn btn-sm btn-outline-light ms-1" onclick="loadPortalData(true)" title="Refresh Data">
+            <i class="bi bi-arrow-clockwise" id="refreshIcon"></i>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- MAIN CONTAINER -->
+    <div class="container-fluid px-3 px-md-5 my-4">
+
+      <!-- INITIAL LOADING STATE -->
+      <div id="loadingSpinner" class="text-center py-5">
+        <div class="spinner-border text-primary" style="width: 3rem; height: 3rem; color: #6f31a0 !important;" role="status"></div>
+        <p class="mt-3 text-muted fw-bold">Loading DBHS Activities & Schedules...</p>
+      </div>
+
+      <!-- MAIN PORTAL CONTENT -->
+      <div id="portalContent" class="d-none">
+
+        <!-- DEEP-LINKED REQUEST BANNER (IF URL CONTAINS ?id=...) -->
+        <div id="deepLinkAlert" class="alert alert-info alert-dismissible fade show d-none shadow-sm" role="alert">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-info-circle-fill fs-5 text-primary"></i>
+            <div>
+              <strong>Filtered to Request:</strong> Viewing details for <span id="deepLinkIdSpan" class="fw-bold"></span>.
+              <a href="#" class="alert-link ms-2" onclick="clearDeepLinkFilter()">View All Requests</a>
+            </div>
+          </div>
+          <button type="button" class="btn-close" onclick="clearDeepLinkFilter()"></button>
+        </div>
+
+        <!-- OPS SECRETARY CALENDAR EDITOR BANNER -->
+        <div id="secretaryBanner" class="secretary-banner d-none">
+          <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2">
+            <div>
+              <h5 class="fw-bold mb-1 text-dark">
+                <i class="bi bi-calendar-check-fill text-primary me-2"></i> Operations Secretary Calendar Management
+              </h5>
+              <p class="mb-0 text-muted small">
+                You are authorized as a <strong>Calendar Dashboard Editor</strong>. You have permission to edit activity schedules, modify reoccurring dates, and synchronize approved requests with the DBHS Master Google Calendar.
+              </p>
+            </div>
+            <div>
+              <button class="btn btn-dbhs-primary btn-sm px-3 shadow-sm" onclick="switchTab('secretaryTab')">
+                <i class="bi bi-calendar-event me-1"></i> Manage Calendar Schedules
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- STAT METRIC CARDS -->
+        <div class="row g-3 mb-4">
+          <div class="col-6 col-lg-3">
+            <div class="stat-card p-3 d-flex align-items-center gap-3">
+              <div class="stat-icon stat-icon-purple">
+                <i class="bi bi-collection-fill"></i>
+              </div>
+              <div>
+                <div class="text-muted small fw-bold">Total Requests</div>
+                <div class="h3 fw-bold mb-0" id="statTotal">0</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card p-3 d-flex align-items-center gap-3">
+              <div class="stat-icon stat-icon-gold">
+                <i class="bi bi-clock-history"></i>
+              </div>
+              <div>
+                <div class="text-muted small fw-bold">Pending Approval</div>
+                <div class="h3 fw-bold mb-0 text-warning" id="statPending">0</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card p-3 d-flex align-items-center gap-3">
+              <div class="stat-icon stat-icon-green">
+                <i class="bi bi-check-circle-fill"></i>
+              </div>
+              <div>
+                <div class="text-muted small fw-bold">Approved</div>
+                <div class="h3 fw-bold mb-0 text-success" id="statApproved">0</div>
+              </div>
+            </div>
+          </div>
+          <div class="col-6 col-lg-3">
+            <div class="stat-card p-3 d-flex align-items-center gap-3">
+              <div class="stat-icon stat-icon-blue">
+                <i class="bi bi-calendar2-check-fill"></i>
+              </div>
+              <div>
+                <div class="text-muted small fw-bold">Calendar Synced</div>
+                <div class="h3 fw-bold mb-0 text-primary" id="statSynced">0</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SEARCH & FILTER TOOLBAR -->
+        <div class="card border-0 shadow-sm rounded-3 mb-4">
+          <div class="card-body p-3">
+            <div class="row g-2 align-items-center">
+              <div class="col-md-5">
+                <div class="input-group search-input-group">
+                  <span class="input-group-text bg-white border-end-0 text-muted">
+                    <i class="bi bi-search"></i>
+                  </span>
+                  <input type="text" id="searchInput" class="form-control border-start-0 ps-0"
+                         placeholder="Search by title, Request ID, group, advisor, or location..."
+                         oninput="applyFilters()">
+                </div>
+              </div>
+              <div class="col-6 col-md-3">
+                <select id="statusFilter" class="form-select" onchange="applyFilters()">
+                  <option value="">All Statuses</option>
+                  <option value="Pending">Pending Approval</option>
+                  <option value="Approved">Approved</option>
+                  <option value="Denied">Denied</option>
+                  <option value="Changes Requested">Changes Requested</option>
+                </select>
+              </div>
+              <div class="col-6 col-md-4">
+                <select id="locationFilter" class="form-select" onchange="applyFilters()">
+                  <option value="">All Locations</option>
+                  <option value="Amphitheater">Amphitheater</option>
+                  <option value="Bullpen">Bullpen</option>
+                  <option value="Corkrum Corral">Corkrum Corral</option>
+                  <option value="Gym">Gym</option>
+                  <option value="Golden Horseshoe">Golden Horseshoe</option>
+                  <option value="Library">Library</option>
+                  <option value="Stadium">Stadium</option>
+                  <option value="Theater">Theater</option>
+                  <option value="Upper Quad">Upper Quad</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- TABS NAVIGATION -->
+        <ul class="nav nav-pills mb-3 gap-2" id="portalTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tabAllRequests" onclick="switchTab('all')">
+              <i class="bi bi-grid-fill me-1"></i> All Activities
+              <span class="badge bg-light text-dark ms-1" id="badgeAllCount">0</span>
+            </button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tabMyApprovals" onclick="switchTab('myApprovals')">
+              <i class="bi bi-shield-check me-1"></i> My Location Reviews
+              <span class="badge bg-warning text-dark ms-1" id="badgePendingReviewCount">0</span>
+            </button>
+          </li>
+          <li class="nav-item d-none" id="secretaryTabNavItem" role="presentation">
+            <button class="nav-link" id="tabSecretary" onclick="switchTab('secretaryTab')">
+              <i class="bi bi-calendar3 me-1"></i> Calendar & Schedule Management
+              <span class="badge bg-success ms-1" id="badgeSecretaryCount">0</span>
+            </button>
+          </li>
+        </ul>
+
+        <!-- TAB CONTENT: REQUESTS TABLE -->
+        <div class="card border-0 shadow-sm rounded-3">
+          <div class="table-responsive">
+            <table class="table custom-table table-hover align-middle">
+              <thead>
+                <tr>
+                  <th style="width: 140px;">Request ID</th>
+                  <th>Activity / Title</th>
+                  <th>Location & Date</th>
+                  <th>Group & Advisor</th>
+                  <th style="width: 130px;">Status</th>
+                  <th style="width: 120px;">Calendar</th>
+                  <th class="text-end" style="width: 160px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="requestsTableBody">
+                <!-- Dynamically Populated -->
+              </tbody>
+            </table>
+          </div>
+
+          <!-- EMPTY STATE -->
+          <div id="emptyState" class="text-center py-5 d-none">
+            <i class="bi bi-calendar2-x text-muted" style="font-size: 3rem;"></i>
+            <h5 class="fw-bold mt-3 mb-1">No Activity Requests Found</h5>
+            <p class="text-muted small">No activities match your current search or filter criteria.</p>
+            <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">Reset Filters</button>
+          </div>
+        </div>
+
+      </div> <!-- /portalContent -->
+    </div> <!-- /container -->
+
+
+    <!-- ========================================================================= -->
+    <!-- MODAL 1: REQUEST DETAILS & APPROVAL VIEW -->
+    <!-- ========================================================================= -->
+    <div class="modal fade" id="requestDetailsModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header modal-header-dbhs py-3 px-4">
+            <div class="d-flex align-items-center gap-3">
+              <span class="badge bg-warning text-dark fs-6 fw-bold px-3 py-2 rounded-3" id="modalRequestIdBadge">DBHS-ACT-000</span>
+              <h5 class="modal-title fw-bold mb-0 text-white" id="modalEventTitle">Activity Details</h5>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+
+          <div class="modal-body p-4 bg-light">
+
+            <!-- VISUAL STATUS TRACKER -->
+            <div class="status-tracker-container">
+              <div class="step-track" id="visualStatusTracker">
+                <!-- Step 1: Form Submission -->
+                <div class="step-item completed" id="trackStep1">
+                  <div class="step-circle"><i class="bi bi-file-earmark-text"></i></div>
+                  <div class="step-label">Submitted</div>
+                  <div class="step-subtext" id="trackStep1Time">Form Received</div>
+                </div>
+                <!-- Step 2: Location Facility Review -->
+                <div class="step-item" id="trackStep2">
+                  <div class="step-circle"><i class="bi bi-building-check"></i></div>
+                  <div class="step-label">Location Review</div>
+                  <div class="step-subtext" id="trackStep2Approver">Pending Approver</div>
+                </div>
+                <!-- Step 3: Master Calendar Scheduling -->
+                <div class="step-item" id="trackStep3">
+                  <div class="step-circle"><i class="bi bi-calendar2-check"></i></div>
+                  <div class="step-label">Calendar Sync</div>
+                  <div class="step-subtext" id="trackStep3Sync">Pending Approval</div>
+                </div>
+                <!-- Step 4: Final Status -->
+                <div class="step-item" id="trackStep4">
+                  <div class="step-circle"><i class="bi bi-check2-all"></i></div>
+                  <div class="step-label">Completion</div>
+                  <div class="step-subtext" id="trackStep4Final">Overall Status</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARD 1: GENERAL EVENT INFORMATION -->
+            <div class="card border-0 shadow-sm rounded-3 mb-3">
+              <div class="card-body p-4">
+                <div class="detail-section-title">
+                  <i class="bi bi-info-circle-fill"></i> Event & Activity Information
+                </div>
+                <div class="row g-3">
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Requesting Group</div>
+                    <div class="detail-value" id="modalReqGroup">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Advisor</div>
+                    <div class="detail-value" id="modalAdvisor">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Advisor Email</div>
+                    <div class="detail-value" id="modalAdvisorEmail">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Submitter Email</div>
+                    <div class="detail-value" id="modalSubmitterEmail">-</div>
+                  </div>
+
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Location</div>
+                    <div class="detail-value fw-bold text-primary" id="modalLocation">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Event Date</div>
+                    <div class="detail-value fw-bold" id="modalEventDate">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Arrival Time</div>
+                    <div class="detail-value" id="modalArrivalTime">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Event Times</div>
+                    <div class="detail-value" id="modalEventTimes">-</div>
+                  </div>
+
+                  <div class="col-12" id="modalReoccurringSection">
+                    <div class="detail-label">Reoccurring Event Dates</div>
+                    <div class="detail-value" id="modalReoccurringDates">-</div>
+                  </div>
+
+                  <div class="col-12">
+                    <div class="detail-label">Event Description</div>
+                    <div class="detail-value text-muted" id="modalEventDesc" style="white-space: pre-wrap;">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARD 2: SET-UP & FACILITY REQUIREMENTS (BRANCHING) -->
+            <div class="card border-0 shadow-sm rounded-3 mb-3 d-none" id="modalSetupCard">
+              <div class="card-body p-4">
+                <div class="detail-section-title text-success" style="color: #2e7d32 !important; border-color: #c8e6c9;">
+                  <i class="bi bi-tools"></i> Facility & Set-Up Requirements
+                </div>
+                <div class="row g-3">
+                  <div class="col-md-6 col-lg-4">
+                    <div class="detail-label">Total Facility Duration</div>
+                    <div class="detail-value" id="modalFacilityDuration">-</div>
+                  </div>
+                  <div class="col-md-3 col-lg-2">
+                    <div class="detail-label">Chairs</div>
+                    <div class="detail-value" id="modalNumChairs">-</div>
+                  </div>
+                  <div class="col-md-3 col-lg-2">
+                    <div class="detail-label">Tables</div>
+                    <div class="detail-value" id="modalNumTables">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-4">
+                    <div class="detail-label">Podium & Stage</div>
+                    <div class="detail-value" id="modalPodiumStage">-</div>
+                  </div>
+
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Risers & Coffee Pot</div>
+                    <div class="detail-value" id="modalRisersCoffee">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Portable PA System</div>
+                    <div class="detail-value" id="modalPaSystem">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Projector & Screen</div>
+                    <div class="detail-value" id="modalProjectorScreen">-</div>
+                  </div>
+                  <div class="col-md-6 col-lg-3">
+                    <div class="detail-label">Microphones</div>
+                    <div class="detail-value" id="modalMicrophones">-</div>
+                  </div>
+
+                  <div class="col-md-6">
+                    <div class="detail-label">Theater / Stage Usage & Curtain</div>
+                    <div class="detail-value" id="modalStageCurtain">-</div>
+                  </div>
+                  <div class="col-md-6" id="modalDiagramSection">
+                    <div class="detail-label">Uploaded Diagram File</div>
+                    <div class="detail-value" id="modalDiagramUrl">-</div>
+                  </div>
+
+                  <div class="col-12" id="modalAdditionalInfoSection">
+                    <div class="detail-label">Additional Set-up Information</div>
+                    <div class="detail-value" id="modalAdditionalInfo">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARD 3: REVENUE POTENTIAL FORM (BRANCHING) -->
+            <div class="card border-0 shadow-sm rounded-3 mb-3 d-none" id="modalRevenueCard">
+              <div class="card-body p-4">
+                <div class="detail-section-title text-warning" style="color: #b78103 !important; border-color: #ffe082;">
+                  <i class="bi bi-cash-stack"></i> Revenue Potential Summary
+                </div>
+                <div class="row g-3">
+                  <div class="col-md-4">
+                    <div class="detail-label">Account Number</div>
+                    <div class="detail-value" id="modalRevAccount">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Beginning Sales Date</div>
+                    <div class="detail-value" id="modalRevStartDate">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Ending Sales Date</div>
+                    <div class="detail-value" id="modalRevEndDate">-</div>
+                  </div>
+
+                  <div class="col-md-4">
+                    <div class="detail-label">Units Purchased & Cost Each</div>
+                    <div class="detail-value" id="modalRevUnitsCost">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Total Net Cost</div>
+                    <div class="detail-value" id="modalRevTotalNetCost">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Projected Sales (Units x Price)</div>
+                    <div class="detail-value" id="modalRevProjectedSales">-</div>
+                  </div>
+
+                  <div class="col-md-4">
+                    <div class="detail-label">Projected Gross Income</div>
+                    <div class="detail-value text-primary fw-bold" id="modalRevGrossIncome">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Estimated Expenses</div>
+                    <div class="detail-value text-danger" id="modalRevExpenses">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Potential Net Profit</div>
+                    <div class="detail-value text-success fw-bold" id="modalRevNetProfit">-</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- CARD 4: WORKFLOW LOG & CALENDAR SYNC -->
+            <div class="card border-0 shadow-sm rounded-3">
+              <div class="card-body p-4">
+                <div class="detail-section-title">
+                  <i class="bi bi-clock-history"></i> Workflow History & Calendar Sync
+                </div>
+                <div class="row g-3 mb-3">
+                  <div class="col-md-4">
+                    <div class="detail-label">Current Approver</div>
+                    <div class="detail-value" id="modalCurrentApprover">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Calendar Sync Status</div>
+                    <div class="detail-value" id="modalCalendarSyncStatus">-</div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="detail-label">Last Updated</div>
+                    <div class="detail-value" id="modalLastUpdated">-</div>
+                  </div>
+                  <div class="col-12" id="modalCalendarIdsSection">
+                    <div class="detail-label">Google Calendar Event IDs</div>
+                    <div class="detail-value small text-muted" id="modalCalendarIds">-</div>
+                  </div>
+                </div>
+
+                <div class="detail-label mb-1">Approval Log</div>
+                <div class="approval-log-box" id="modalApprovalLog">No approval log entries.</div>
+              </div>
+            </div>
+
+          </div> <!-- /modal-body -->
+
+          <!-- MODAL FOOTER / ACTION CONTROLS -->
+          <div class="modal-footer bg-white d-flex justify-content-between p-3 border-top">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
+
+            <!-- APPROVER ACTIONS CONTAINER -->
+            <div id="approverActionsContainer" class="d-flex gap-2">
+              <button class="btn btn-outline-warning text-dark fw-bold" onclick="promptApprovalAction('request_changes')">
+                <i class="bi bi-pencil-square me-1"></i> Request Changes
+              </button>
+              <button class="btn btn-outline-danger fw-bold" onclick="promptApprovalAction('deny')">
+                <i class="bi bi-x-circle me-1"></i> Deny
+              </button>
+              <button class="btn btn-success fw-bold px-3" onclick="promptApprovalAction('approve')">
+                <i class="bi bi-check-circle me-1"></i> Approve & Sync Calendar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- MODAL 2: OPS SECRETARY CALENDAR & SCHEDULE EDITOR -->
+    <!-- ========================================================================= -->
+    <div class="modal fade" id="secretaryEditorModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-lg">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header modal-header-dbhs py-3 px-4">
+            <div class="d-flex align-items-center gap-2">
+              <i class="bi bi-calendar3 fs-5 text-warning"></i>
+              <h5 class="modal-title fw-bold mb-0 text-white">Calendar & Schedule Editor</h5>
+            </div>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+
+          <form id="secretaryScheduleForm" onsubmit="handleSecretaryFormSubmit(event)">
+            <div class="modal-body p-4">
+              <div class="alert alert-secondary small py-2 mb-3">
+                <i class="bi bi-shield-lock-fill text-primary me-1"></i>
+                Authorized as Ops Secretary. Changes will update the sheet and synchronize the <strong>DBHS Master Activities Calendar</strong>.
+              </div>
+
+              <input type="hidden" id="editRequestId">
+
+              <div class="row g-3">
+                <div class="col-md-8">
+                  <label class="form-label fw-bold small text-muted">Event Title <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" id="editEventTitle" required>
+                </div>
+                <div class="col-md-4">
+                  <label class="form-label fw-bold small text-muted">Location <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" id="editLocation" required>
+                </div>
+
+                <div class="col-md-6">
+                  <label class="form-label fw-bold small text-muted">Primary Event Date <span class="text-danger">*</span></label>
+                  <input type="date" class="form-control" id="editEventDate" required>
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label fw-bold small text-muted">Start Time</label>
+                  <input type="text" class="form-control" id="editStartTime" placeholder="e.g. 03:30 PM">
+                </div>
+                <div class="col-md-3">
+                  <label class="form-label fw-bold small text-muted">End Time</label>
+                  <input type="text" class="form-control" id="editEndTime" placeholder="e.g. 05:00 PM">
+                </div>
+
+                <div class="col-12">
+                  <label class="form-label fw-bold small text-muted">Additional / Reoccurring Dates</label>
+                  <input type="text" class="form-control" id="editAdditionalDates"
+                         placeholder="Comma-separated dates: e.g. 12/01/2026, 12/08/2026, 12/15/2026">
+                  <div class="form-text small">Enter comma-separated dates. Existing calendar events will be updated, newly added dates will be created, and removed dates will be deleted.</div>
+                </div>
+
+                <div class="col-12">
+                  <label class="form-label fw-bold small text-muted">Event Description / Schedule Notes</label>
+                  <textarea class="form-control" id="editDescription" rows="3"></textarea>
+                </div>
+              </div>
+
+              <!-- CURRENT CALENDAR STATUS DISPLAY -->
+              <div class="mt-3 p-3 bg-light rounded-3 border">
+                <div class="small fw-bold text-muted mb-1">Current Calendar Event IDs:</div>
+                <div class="small text-break font-monospace text-muted" id="editCurrentCalendarIds">None</div>
+              </div>
+            </div>
+
+            <div class="modal-footer bg-light p-3">
+              <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+              <button type="submit" class="btn btn-dbhs-primary px-4 fw-bold" id="btnSaveSchedule">
+                <span class="spinner-border spinner-border-sm me-1 d-none" id="saveScheduleSpinner"></span>
+                <i class="bi bi-cloud-arrow-up-fill me-1" id="saveScheduleIcon"></i> Save & Sync to Calendar
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- MODAL 3: APPROVAL ACTION CONFIRMATION DIALOG -->
+    <!-- ========================================================================= -->
+    <div class="modal fade" id="actionConfirmModal" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header py-3 px-4" id="actionModalHeader">
+            <h5 class="modal-title fw-bold text-white mb-0" id="actionModalTitle">Confirm Action</h5>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+          </div>
+          <div class="modal-body p-4">
+            <p id="actionModalMessage" class="mb-3">Are you sure you want to perform this action?</p>
+            <div class="mb-3">
+              <label class="form-label fw-bold small text-muted" id="actionCommentsLabel">Comments / Notes:</label>
+              <textarea class="form-control" id="actionCommentsInput" rows="3" placeholder="Enter comments or instructions..."></textarea>
+            </div>
+          </div>
+          <div class="modal-footer p-3 bg-light">
+            <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn fw-bold px-4" id="btnConfirmActionSubmit" onclick="executeApprovalAction()">
+              <span class="spinner-border spinner-border-sm me-1 d-none" id="actionSubmitSpinner"></span>
+              Confirm & Submit
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ========================================================================= -->
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <!-- ========================================================================= -->
+    <div class="toast-container toast-container-custom">
+      <div id="liveToast" class="toast align-items-center text-white border-0 shadow-lg" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="d-flex">
+          <div class="toast-body d-flex align-items-center gap-2" id="toastMessage">
+            Notification message.
+          </div>
+          <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
+    <?!= include('JavaScript'); ?>
+
+    <!-- Deep Link Initialization -->
+    <script>
+      window.INITIAL_REQUEST_ID = "<?= initialRequestId ?>";
+    </script>
+  </body>
+</html>
