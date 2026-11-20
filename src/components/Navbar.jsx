@@ -24,11 +24,13 @@ export default function Navbar({ activeTab, setActiveTab, currentUser, onLogout,
           
           {/* Logo & School Title */}
           <div className="flex items-center space-x-3 cursor-pointer" onClick={() => setActiveTab('teacher')}>
-            <img 
-              src={DBHS_LOGO_URL} 
-              alt="Diamond Bar High School" 
-              className="h-10 w-auto object-contain filter drop-shadow"
-            />
+            <div className="w-11 h-11 bg-white rounded-full p-1.5 shadow-md flex items-center justify-center shrink-0 border border-purple-200">
+              <img 
+                src={DBHS_LOGO_URL} 
+                alt="Diamond Bar High School" 
+                className="h-8 w-auto object-contain"
+              />
+            </div>
             <div className="hidden sm:block">
               <span className="font-extrabold text-lg tracking-wide text-white flex items-center gap-1.5">
                 DBHS Activities <span className="text-[#ffd760] font-normal text-sm px-2 py-0.5 rounded-full bg-purple-900/60 border border-[#ffd760]/40">Portal</span>

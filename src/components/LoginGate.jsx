@@ -7,22 +7,43 @@ export default function LoginGate({ onLogin }) {
   const [error, setError] = useState('');
 
   const demoAccounts = [
-    { email: 'kwendland@wvusd.org', role: 'Ops Secretary & District Admin', label: 'Kevin Wendland (Full Access)' },
-    { email: 'athletics@wvusd.org', role: 'Location Approver', label: 'Gym & Stadium Approver' },
-    { email: 'theatertech@wvusd.org', role: 'Location Approver', label: 'Theater Approver' },
-    { email: 'advisor@wvusd.org', role: 'Club Advisor', label: 'Staff Submitter' }
+    { 
+      email: 'kwendland@wvusd.org', 
+      role: 'Ops Secretary & District Admin', 
+      label: 'Kevin Wendland (Full Access)',
+      locations: ['Amphitheater', 'Bullpen', 'Corkrum Corral', 'Gym', 'Golden Horseshoe', 'Library', 'Stadium', 'Theater', 'Upper Quad', 'Other'],
+      roles: { isAdmin: true, isOpsSecretary: true, isApprover: true }
+    },
+    { 
+      email: 'athletics@wvusd.org', 
+      role: 'Location Approver', 
+      label: 'Gym & Stadium Approver',
+      locations: ['Gym', 'Stadium'],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
+      email: 'theatertech@wvusd.org', 
+      role: 'Location Approver', 
+      label: 'Theater Approver',
+      locations: ['Theater'],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: true }
+    },
+    { 
+      email: 'advisor@wvusd.org', 
+      role: 'Club Advisor', 
+      label: 'Staff Submitter',
+      locations: [],
+      roles: { isAdmin: false, isOpsSecretary: false, isApprover: false }
+    }
   ];
 
-  const handleSelectDemo = (email) => {
+  const handleSelectDemo = (acc) => {
     onLogin({
-      email,
-      name: email.split('@')[0],
-      roles: {
-        isAdmin: email.includes('kwendland'),
-        isOpsSecretary: email.includes('kwendland'),
-        isApprover: true
-      }
-    }, `DEV_MOCK_${email}`);
+      email: acc.email,
+      name: acc.email.split('@')[0],
+      locations: acc.locations,
+      roles: acc.roles
+    }, `DEV_MOCK_${acc.email}`);
   };
 
   const handleCustomSubmit = (e) => {
@@ -32,12 +53,14 @@ export default function LoginGate({ onLogin }) {
       return;
     }
     const cleanEmail = customEmail.trim().toLowerCase();
+    const isKevin = cleanEmail.includes('kwendland');
     onLogin({
       email: cleanEmail,
       name: cleanEmail.split('@')[0],
+      locations: isKevin ? ['Amphitheater', 'Bullpen', 'Corkrum Corral', 'Gym', 'Golden Horseshoe', 'Library', 'Stadium', 'Theater', 'Upper Quad', 'Other'] : [],
       roles: {
-        isAdmin: cleanEmail.includes('kwendland'),
-        isOpsSecretary: cleanEmail.includes('kwendland') || cleanEmail.includes('secretary'),
+        isAdmin: isKevin,
+        isOpsSecretary: isKevin || cleanEmail.includes('secretary'),
         isApprover: true
       }
     }, `DEV_MOCK_${cleanEmail}`);
@@ -49,11 +72,13 @@ export default function LoginGate({ onLogin }) {
         
         {/* Header Branding */}
         <div className="text-center">
-          <img 
-            src={DBHS_LOGO_URL} 
-            alt="DBHS Brahmas" 
-            className="h-16 w-auto mx-auto object-contain filter drop-shadow-md"
-          />
+          <div className="w-20 h-20 bg-white rounded-full p-2.5 mx-auto shadow-lg flex items-center justify-center border-2 border-purple-200">
+            <img 
+              src={DBHS_LOGO_URL} 
+              alt="DBHS Brahmas" 
+              className="h-14 w-auto object-contain filter drop-shadow-sm"
+            />
+          </div>
           <h1 className="text-2xl font-black text-purple-950 mt-4 tracking-tight">
             DBHS Activities Portal
           </h1>
@@ -72,7 +97,7 @@ export default function LoginGate({ onLogin }) {
             {demoAccounts.map((acc) => (
               <button
                 key={acc.email}
-                onClick={() => handleSelectDemo(acc.email)}
+                onClick={() => handleSelectDemo(acc)}
                 className="w-full text-left p-3 rounded-xl border border-purple-100 hover:border-purple-300 bg-purple-50/50 hover:bg-purple-50 transition group flex items-center justify-between"
               >
                 <div>

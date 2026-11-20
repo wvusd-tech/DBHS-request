@@ -3,10 +3,27 @@ import {
   Calendar, Clock, MapPin, Search, Filter, Edit3, 
   Save, RefreshCw, CheckCircle2, AlertCircle, History, 
   MessageSquare, ExternalLink, ArrowRight, X, Plus, Trash2,
-  Wrench, DollarSign, Send, Check
+  Wrench, DollarSign, Send, Check, ShieldAlert
 } from 'lucide-react';
 import { DBHS_LOCATIONS } from '../constants/locations';
 import { api } from '../api';
+
+function getMonthYearString(dateVal) {
+  if (!dateVal) return null;
+  const d = new Date(dateVal);
+  if (isNaN(d.getTime())) {
+    const parts = String(dateVal).split('/');
+    if (parts.length === 3) {
+      const monthNum = parseInt(parts[0], 10);
+      const yearNum = parseInt(parts[2], 10);
+      if (!isNaN(monthNum) && !isNaN(yearNum)) {
+        return new Date(yearNum, monthNum - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+      }
+    }
+    return null;
+  }
+  return d.toLocaleString('default', { month: 'long', year: 'numeric' });
+}
 
 export default function OpsDashboard({ 
   requests = [], 
@@ -14,8 +31,9 @@ export default function OpsDashboard({
   onRefresh 
 }) {
   const [selectedReqId, setSelectedReqId] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('All'); // 'All' | 'Approved' | 'Pending'
+  const [statusFilter, setStatusFilter] = useState('All'); // 'All' | 'Approved' | 'Pending' | 'Changes Requested'
   const [locationFilter, setLocationFilter] = useState('All');
+  const [monthFilter, setMonthFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Edit Calendar Modal state
@@ -39,22 +57,31 @@ export default function OpsDashboard({
   const [savingNote, setSavingNote] = useState(false);
   const [noteMsg, setNoteMsg] = useState('');
 
-  // Currently selected request
-  const currentRequest = useMemo(() => {
-    if (!selectedReqId && requests.length > 0) {
-      // Default to first approved, or first request
-      const firstApproved = requests.find(r => r.status === 'Approved');
-      return firstApproved || requests[0];
-    }
-    return requests.find(r => r.requestId === selectedReqId) || requests[0] || null;
-  }, [selectedReqId, requests]);
+  // Access control check for Ops Secretary
+  const hasAccess = currentUser?.roles?.isOpsSecretary || currentUser?.roles?.isAdmin;
+
+  // Extract distinct months for the month dropdown filter
+  const availableMonths = useMemo(() => {
+    const monthsSet = new Set();
+    requests.forEach(r => {
+      const m = getMonthYearString(r.eventDateRaw || r.eventDate);
+      if (m) monthsSet.add(m);
+    });
+    return Array.from(monthsSet);
+  }, [requests]);
 
   // Filtered requests list
   const filteredRequests = useMemo(() => {
     return requests.filter(r => {
       if (statusFilter === 'Approved' && r.status !== 'Approved') return false;
       if (statusFilter === 'Pending' && r.status !== 'Pending') return false;
+      if (statusFilter === 'Changes Requested' && r.status !== 'Changes Requested') return false;
       if (locationFilter !== 'All' && r.location !== locationFilter) return false;
+
+      if (monthFilter !== 'All') {
+        const m = getMonthYearString(r.eventDateRaw || r.eventDate);
+        if (m !== monthFilter) return false;
+      }
 
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
@@ -67,7 +94,37 @@ export default function OpsDashboard({
       }
       return true;
     });
-  }, [requests, statusFilter, locationFilter, searchQuery]);
+  }, [requests, statusFilter, locationFilter, monthFilter, searchQuery]);
+
+  // Currently selected request
+  const currentRequest = useMemo(() => {
+    if (!selectedReqId && filteredRequests.length > 0) {
+      const firstApproved = filteredRequests.find(r => r.status === 'Approved');
+      return firstApproved || filteredRequests[0];
+    }
+    return filteredRequests.find(r => r.requestId === selectedReqId) || filteredRequests[0] || null;
+  }, [selectedReqId, filteredRequests]);
+
+  // Security gate for non-Ops Secretaries
+  if (!hasAccess) {
+    return (
+      <div className="bg-white rounded-3xl border border-purple-100 p-10 max-w-lg mx-auto shadow-sm my-12 text-center">
+        <div className="w-16 h-16 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center mx-auto mb-4">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-black text-purple-950">Calendar Dashboard Restricted</h3>
+        <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+          The Calendar Dashboard and Master Google Calendar Schedule Editor is locked to authorized Operations Secretaries listed in <strong>Approvers Tab Col C (Calendar Dashboard Editors)</strong>.
+        </p>
+        <div className="mt-4 p-3 bg-purple-50 rounded-xl text-xs text-purple-900 font-mono">
+          Current account: {currentUser?.email || 'Guest'}
+        </div>
+        <p className="text-[11px] text-slate-400 mt-4">
+          Switch to an authorized secretary demo account (e.g. <code>kwendland@wvusd.org</code>) via the top right profile menu to view and edit.
+        </p>
+      </div>
+    );
+  }
 
   // Open Edit Calendar Modal
   const handleOpenEditModal = () => {
@@ -155,9 +212,9 @@ export default function OpsDashboard({
 
         <button
           onClick={onRefresh}
-          className="bg-purple-900/60 hover:bg-purple-900 text-purple-100 hover:text-white border border-purple-400/40 text-xs font-bold px-4 py-2.5 rounded-xl flex items-center gap-2 self-start sm:self-center transition"
+          className="bg-[#ffd760] hover:bg-amber-300 text-purple-950 font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 self-start sm:self-center transition shadow-md hover:shadow-lg active:scale-95 border border-amber-300"
         >
-          <RefreshCw className="w-4 h-4" />
+          <RefreshCw className="w-4 h-4 text-purple-950 stroke-[2.5]" />
           Refresh Live Data
         </button>
       </div>
@@ -170,10 +227,10 @@ export default function OpsDashboard({
           
           {/* Filter Bar */}
           <div className="bg-white rounded-2xl border border-purple-100 p-4 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs font-bold text-slate-700">Filter Activities</span>
-              <div className="flex gap-1">
-                {['All', 'Approved', 'Pending'].map((st) => (
+              <div className="flex gap-1 flex-wrap justify-end">
+                {['All', 'Approved', 'Pending', 'Changes Requested'].map((st) => (
                   <button
                     key={st}
                     onClick={() => setStatusFilter(st)}
@@ -189,15 +246,33 @@ export default function OpsDashboard({
               </div>
             </div>
 
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                placeholder="Search by title, ID, group..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full text-xs pl-9 pr-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-600 focus:outline-none"
-              />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  placeholder="Search title, ID..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full text-xs pl-9 pr-3 py-2 border rounded-xl focus:ring-2 focus:ring-purple-600 focus:outline-none"
+                />
+              </div>
+
+              {/* Month Dropdown Filter */}
+              <div>
+                <select
+                  value={monthFilter}
+                  onChange={(e) => setMonthFilter(e.target.value)}
+                  className="w-full text-xs py-2 px-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-600 focus:outline-none bg-slate-50 text-slate-700 font-medium"
+                >
+                  <option value="All">📅 All Months</option>
+                  {availableMonths.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
