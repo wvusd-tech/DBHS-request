@@ -6,7 +6,7 @@
 export const GAS_API_URL = import.meta.env.VITE_API_URL || 
   import.meta.env.VITE_GAS_API_URL || 
   localStorage.getItem('DBHS_GAS_API_URL') || 
-  "";
+  "https://script.google.com/macros/s/AKfycbzaTFpHFAdMhObfdcX8mVamN3m_YJEO9hfRF3pdFzt3rd35YPSiqFgdIm3h0oRfa6a8Vg/exec";
 
 export function setCustomGasUrl(url) {
   if (url) {
